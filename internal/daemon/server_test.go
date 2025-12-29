@@ -30,7 +30,6 @@ func TestDaemonStartAndBind(t *testing.T) {
 		errCh <- daemon.Start()
 	}()
 
-	// Wait for daemon to be ready
 	<-daemon.Ready()
 
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
@@ -104,7 +103,6 @@ func TestDaemonAcceptEvent(t *testing.T) {
 		t.Fatalf("Failed to send event: %v", err)
 	}
 
-	// Wait for event to be processed and stored
 	retrieved := waitForEvent(t, db, event.ID, 1*time.Second)
 
 	if retrieved.PromptText != event.PromptText {
@@ -139,10 +137,8 @@ func TestDaemonInvalidJSON(t *testing.T) {
 		t.Fatalf("Failed to write to socket: %v", err)
 	}
 
-	// Give daemon a moment to handle invalid JSON (should not crash)
 	time.Sleep(10 * time.Millisecond)
 
-	// Verify daemon still responsive
 	conn2, err := net.Dial("unix", socketPath)
 	if err != nil {
 		t.Error("Daemon crashed on invalid JSON")
@@ -246,7 +242,6 @@ func TestDaemonConcurrentEvents(t *testing.T) {
 
 	wg.Wait()
 
-	// Wait for all events to be processed and stored
 	events := waitForEventCount(t, db, "concurrent-session", numEvents, 2*time.Second)
 
 	if len(events) != numEvents {
@@ -290,7 +285,6 @@ func TestDaemonSessionEvent(t *testing.T) {
 		t.Fatalf("Failed to send session event: %v", err)
 	}
 
-	// Wait for session to be processed and stored
 	session := waitForSession(t, db, "/home/user/project", 1*time.Second)
 
 	if session.ID != "daemon-session-1" {
