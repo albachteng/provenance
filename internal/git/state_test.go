@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,7 +92,8 @@ func TestCaptureGitStateModifiedFile(t *testing.T) {
 
 	found := false
 	for _, file := range state.DirtyFiles {
-		if file == "README.md" || file == " M README.md" {
+		// Accept any line containing README.md (format can vary: " M README.md", "M  README.md", etc.)
+		if strings.Contains(file, "README.md") {
 			found = true
 			break
 		}
@@ -248,6 +250,10 @@ func TestCaptureGitStateWithSubmodule(t *testing.T) {
 
 	submoduleRepo := setupTestRepo(t)
 	defer os.RemoveAll(submoduleRepo)
+
+	// Allow file:// protocol for local submodules (test only)
+	runGit(t, repo, "config", "--global", "protocol.file.allow", "always")
+	defer runGit(t, repo, "config", "--global", "--unset", "protocol.file.allow")
 
 	runGit(t, repo, "submodule", "add", submoduleRepo, "submodule")
 	runGit(t, repo, "commit", "-m", "Add submodule")
