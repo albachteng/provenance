@@ -160,12 +160,13 @@ CREATE TABLE sessions (
 - Refactor for clarity and performance
 
 ### Deliverables
-- [ ] **Go daemon**: Local Unix socket server
-  - Accepts JSON events via socket (HTTP fallback for Windows compatibility)
-  - SQLite schema + migrations
-  - Write-ahead logging (WAL) mode
-  - Graceful shutdown (flush buffers)
-  - Session management (auto-start, timeout-based end)
+- [x] **Go daemon**: Local Unix socket server
+  - [x] SQLite schema + migrations (using golang-migrate)
+  - [x] Write-ahead logging (WAL) mode
+  - [x] Database initialization with proper permissions
+  - [ ] Accepts JSON events via socket (HTTP fallback for Windows compatibility)
+  - [ ] Graceful shutdown (flush buffers)
+  - [ ] Session management (auto-start, timeout-based end)
 
 - [ ] **CLI basics**:
   ```bash
@@ -179,11 +180,13 @@ CREATE TABLE sessions (
   prov disable/enable          # Quick opt-out
   ```
 
-- [ ] **Git integration library**:
-  - Capture HEAD, branch, dirty state
-  - List dirty files with diff summaries
-  - Compute ahead/behind vs remote
-  - Session → commit correlation logic
+- [x] **Git integration library** (COMPLETE):
+  - [x] Capture HEAD, branch, dirty state
+  - [x] List dirty files with diff summaries
+  - [x] Compute ahead/behind vs remote
+  - [x] Comprehensive edge case handling (14 tests)
+  - [x] Swappable provider pattern for future migration
+  - [ ] Session → commit correlation logic (deferred to session implementation)
 
 - [ ] **Configuration system** (sensible defaults, highly configurable):
   - Global config: `~/.ai-provenance/config.yaml`
@@ -203,12 +206,40 @@ CREATE TABLE sessions (
   - Session lifecycle tests
 
 ### Success Criteria
-- Can start daemon, send event via socket, query it back via CLI
-- Daemon survives crashes (WAL recovery)
-- Git state accurately captured in test repos
-- Sessions auto-start and timeout correctly
-- Configuration override hierarchy works
-- All tests pass on Linux and macOS
+- [x] Database schema created with all required tables
+- [x] WAL mode enabled for concurrent access
+- [x] All schema tests passing (4/4)
+- [x] Git state accurately captured in test repos (14/14 tests)
+- [x] Edge cases handled (detached HEAD, merge conflicts, submodules, etc.)
+- [ ] Can start daemon, send event via socket, query it back via CLI
+- [ ] Daemon survives crashes (WAL recovery)
+- [ ] Sessions auto-start and timeout correctly
+- [ ] Configuration override hierarchy works
+- [ ] All tests pass on Linux and macOS
+
+### Refactoring Notes (Deferred)
+Track technical debt and future improvements:
+
+**Storage Module** (`internal/storage/db.go`):
+- [ ] Extract hard-coded values to configuration (WAL mode, permissions, timeouts)
+- [ ] Add structured logging for database operations
+- [ ] Make migration path detection more robust (env var override?)
+- [ ] Review SQLite connection pool settings for optimal performance
+- [ ] Consider adding database health checks endpoint
+
+**Git Module** (`internal/git/cli_provider.go`):
+- [ ] Extract common git command execution logic
+- [ ] Add context support for command cancellation
+- [ ] Add structured logging for git operations
+- [ ] Performance testing with large repositories
+- [ ] Consider caching git state for rapid successive calls
+- [ ] Evaluate migration to go-git library (eliminate git dependency)
+
+**Rationale for deferring**: Code is clean and functional. Wait until we have:
+1. Configuration system implemented
+2. Real-world usage patterns
+3. Performance profiling data
+4. User feedback on git command overhead
 
 ---
 

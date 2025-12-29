@@ -1,0 +1,42 @@
+# Binaries
+/prov
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage
+*.out
+coverage.txt
+
+# Go workspace file
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+
+# Local development
+.env
+.env.local
+
+# AI Provenance data (don't commit test databases)
+*.db
+*.db-shm
+*.db-wal
+.ai-provenance/
