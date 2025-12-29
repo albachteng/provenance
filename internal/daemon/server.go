@@ -96,7 +96,14 @@ func (d *Daemon) Start() error {
 			}
 
 			// Handle connection in background
+			d.mu.Lock()
+			if d.stopped {
+				d.mu.Unlock()
+				conn.Close()
+				continue
+			}
 			d.wg.Add(1)
+			d.mu.Unlock()
 			go d.handleConnection(conn)
 		}
 	}
@@ -110,10 +117,9 @@ func (d *Daemon) Stop() error {
 		return nil
 	}
 	d.stopped = true
-	d.mu.Unlock()
-
-	// Signal shutdown
+	// Signal shutdown while holding mutex to avoid race
 	close(d.shutdown)
+	d.mu.Unlock()
 
 	// Close listener to stop accepting new connections
 	if d.listener != nil {
