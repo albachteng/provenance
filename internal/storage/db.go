@@ -27,28 +27,28 @@ func InitDatabase(dbPath string) (*sql.DB, error) {
 
 	// Ping to ensure database file is created
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close() // Best effort cleanup
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	// Set file permissions (owner read/write only)
 	if err := os.Chmod(dbPath, 0600); err != nil {
-		db.Close()
+		_ = db.Close() // Best effort cleanup
 		return nil, fmt.Errorf("failed to set database permissions: %w", err)
 	}
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close() // Best effort cleanup
 		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
 	}
 
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
+		_ = db.Close() // Best effort cleanup
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
 	if err := runMigrations(db); err != nil {
-		db.Close()
+		_ = db.Close() // Best effort cleanup
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 

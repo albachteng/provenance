@@ -122,13 +122,22 @@ func parseDirtyFiles(statusOutput string) []string {
 
 // parseAheadBehind parses the output of git rev-list --left-right --count
 // Expected format: "5\t3" (5 ahead, 3 behind)
+// Returns (0, 0) if parsing fails
 func parseAheadBehind(output string) (ahead int, behind int) {
 	parts := strings.Fields(output)
 	if len(parts) != 2 {
 		return 0, 0
 	}
 
-	ahead, _ = strconv.Atoi(parts[0])
-	behind, _ = strconv.Atoi(parts[1])
+	ahead, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0
+	}
+
+	behind, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0
+	}
+
 	return ahead, behind
 }
