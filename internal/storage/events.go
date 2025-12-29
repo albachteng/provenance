@@ -187,7 +187,7 @@ func ListPromptEvents(db *sql.DB, sessionID string) ([]*PromptEvent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query prompt events: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var events []*PromptEvent
 	for rows.Next() {
