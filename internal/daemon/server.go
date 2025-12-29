@@ -95,7 +95,9 @@ func (d *Daemon) Start() error {
 			d.mu.Lock()
 			if d.stopped {
 				d.mu.Unlock()
-				conn.Close()
+				if err := conn.Close(); err != nil {
+					log.Printf("failed to close rejected connection: %v", err)
+				}
 				continue
 			}
 			d.wg.Add(1)
@@ -134,7 +136,7 @@ func (d *Daemon) Stop() error {
 // handleConnection processes a single connection
 func (d *Daemon) handleConnection(conn net.Conn) {
 	defer d.wg.Done()
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	var buf []byte
 	tmp := make([]byte, 4096)
