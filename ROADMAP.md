@@ -321,7 +321,60 @@ func (c *AsyncComponent) Start() error {
 - HTTP server startup
 - Any long-running background tasks
 
-**Test Helper Pattern** (polling with timeout):
+**Polling Helper Pattern** (deterministic async testing):
+```go
+func waitForCondition(t *testing.T, check func() bool, timeout time.Duration, message string) {
+    t.Helper()
+    deadline := time.Now().Add(timeout)
+    for time.Now().Before(deadline) {
+        if check() {
+            return
+        }
+        time.Sleep(10 * time.Millisecond)  // Short poll interval
+    }
+    t.Fatalf("%s not met within %v timeout", message, timeout)
+}
+```
+
+**Benefits**:
+- **No arbitrary sleeps**: Tests don't waste time waiting fixed durations
+- **Fast and deterministic**: Succeeds as soon as condition is met
+- **Clear failure messages**: Timeout errors describe what was being waited for
+- **Consistent pattern**: All async tests use same approach
+
+**Examples**:
+```go
+// Wait for daemon socket to exist
+waitForDaemonReady(t, tmpDir)
+
+// Wait for event to appear in database
+waitForEventInDB(t, db, func(agent, promptText string) bool {
+    return agent == "claude-code" && strings.Contains(promptText, "test")
+})
+
+// Wait for session creation
+sessionID := waitForSessionInDB(t, db)
+```
+
+**When to use**:
+- Daemon/server startup (socket creation, port binding)
+- Database operations (async event storage, session creation)
+- File system operations (daemon writes PID file, creates sockets)
+- Any asynchronous side effect verification
+
+**Anti-pattern**:
+```go
+// WRONG: Arbitrary sleep
+time.Sleep(100 * time.Millisecond)
+db.Query(...)  // Might still fail if daemon is slow
+
+// RIGHT: Poll until condition is met
+waitForEventInDB(t, db, checkFunc)
+```
+
+Used in: `daemon/server_test.go`, `cmd/prov/hook_test.go`, all integration tests
+
+**Test Helper Pattern** (polling with timeout - DEPRECATED, use Polling Helper instead):
 ```go
 func waitForCondition(t *testing.T, check func() bool, timeout time.Duration) {
     deadline := time.Now().Add(timeout)
