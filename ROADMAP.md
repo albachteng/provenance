@@ -173,17 +173,24 @@ CREATE TABLE sessions (
   - [ ] HTTP fallback for Windows compatibility (deferred)
   - [ ] Session management (auto-start, timeout-based end)
 
-- [ ] **CLI basics**:
+- [x] **CLI basics** (COMPLETE):
   ```bash
-  prov init                    # Initialize ~/.ai-provenance/
-  prov daemon start/stop       # Control background daemon
-  prov list                    # List recent prompts
+  prov version                 # Show version information
+  prov daemon start            # Start background daemon
+  prov daemon stop             # Stop background daemon
+  prov daemon status           # Check daemon status
+  prov list [--limit N]        # List recent prompts (default: 10)
   prov show <id>               # Show full prompt + response
   prov search "query"          # Search prompt text
-  prov session                 # Show active session
-  prov session start/end       # Manual session control
-  prov disable/enable          # Quick opt-out
   ```
+  - [x] Version command with build info
+  - [x] Daemon lifecycle management (start/stop/status)
+  - [x] Query commands (list/show/search)
+  - [x] Integration tests (9/9 tests passing)
+  - [x] Environment variable configuration (AI_PROVENANCE_HOME)
+  - [ ] prov init (deferred - daemon auto-initializes)
+  - [ ] prov session commands (deferred to session management)
+  - [ ] prov disable/enable (deferred to enhanced features)
 
 - [x] **Git integration library** (COMPLETE):
   - [x] Capture HEAD, branch, dirty state
@@ -223,10 +230,12 @@ CREATE TABLE sessions (
 - [x] Daemon handles invalid JSON without crashing
 - [x] Daemon graceful shutdown with socket cleanup
 - [x] Concurrent event submissions handled correctly (10 simultaneous tested)
-- [ ] Can query events back via CLI (read operations)
-- [ ] Daemon survives crashes (WAL recovery)
-- [ ] Sessions auto-start and timeout correctly
-- [ ] Configuration override hierarchy works
+- [x] Can query events back via CLI (9/9 CLI tests passing)
+- [x] CLI daemon control works (start/stop/status with PID management)
+- [x] CLI query operations work (list/show/search with correct output)
+- [ ] Daemon survives crashes (WAL recovery - needs testing)
+- [ ] Sessions auto-start and timeout correctly (deferred to session management)
+- [ ] Configuration override hierarchy works (deferred to config system)
 - [ ] All tests pass on Linux and macOS (currently Linux/WSL2 only)
 
 ### Refactoring Notes (Deferred)
@@ -264,11 +273,22 @@ Track technical debt and future improvements:
 - [ ] Consider caching git state for rapid successive calls
 - [ ] Evaluate migration to go-git library (eliminate git dependency)
 
+**CLI Module** (`cmd/prov/`):
+- [ ] Add structured logging instead of fmt.Fprintf to stderr
+- [ ] Consider cobra/viper for more sophisticated CLI framework
+- [ ] Add shell completion support (bash/zsh/fish)
+- [ ] Extract repeated table formatting logic into helper package
+- [ ] Add color output support (controlled by --color flag or env var)
+- [ ] Consider adding --json output mode for all commands
+- [ ] Add signal handling for daemon (SIGHUP for config reload)
+- [ ] Improve daemon startup polling (use ready channel via socket handshake)
+
 **Rationale for deferring**: Code is clean and functional. Wait until we have:
 1. Configuration system implemented
 2. Real-world usage patterns
 3. Performance profiling data
 4. User feedback on git command overhead
+5. User feedback on CLI ergonomics and desired features
 
 ### Design Patterns Established
 
@@ -796,4 +816,4 @@ provenance/
 
 ---
 
-*Last updated: 2025-12-29 - Daemon implementation complete (Phase 0)*
+*Last updated: 2025-12-29 - CLI basics complete, Phase 0 foundation solid (daemon + storage + git + CLI)*
