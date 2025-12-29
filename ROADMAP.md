@@ -165,8 +165,12 @@ CREATE TABLE sessions (
   - [x] Write-ahead logging (WAL) mode
   - [x] Database initialization with proper permissions
   - [x] Event storage implementation (PromptEvent and Session CRUD)
-  - [ ] Accepts JSON events via socket (HTTP fallback for Windows compatibility)
-  - [ ] Graceful shutdown (flush buffers)
+  - [x] Accepts JSON events via Unix socket
+  - [x] Graceful shutdown with socket cleanup
+  - [x] Ready() channel for startup synchronization
+  - [x] Concurrent connection handling
+  - [x] PromptEvent and SessionEvent routing
+  - [ ] HTTP fallback for Windows compatibility (deferred)
   - [ ] Session management (auto-start, timeout-based end)
 
 - [ ] **CLI basics**:
@@ -215,11 +219,15 @@ CREATE TABLE sessions (
 - [x] Event storage CRUD operations implemented and tested (10/10 tests)
 - [x] JSON array fields properly serialized/deserialized
 - [x] Foreign key constraints validated
-- [ ] Can start daemon, send event via socket, query it back via CLI
+- [x] Daemon starts, accepts events via socket, stores in database (7/7 tests)
+- [x] Daemon handles invalid JSON without crashing
+- [x] Daemon graceful shutdown with socket cleanup
+- [x] Concurrent event submissions handled correctly (10 simultaneous tested)
+- [ ] Can query events back via CLI (read operations)
 - [ ] Daemon survives crashes (WAL recovery)
 - [ ] Sessions auto-start and timeout correctly
 - [ ] Configuration override hierarchy works
-- [ ] All tests pass on Linux and macOS
+- [ ] All tests pass on Linux and macOS (currently Linux/WSL2 only)
 
 ### Refactoring Notes (Deferred)
 Track technical debt and future improvements:
@@ -239,6 +247,15 @@ Track technical debt and future improvements:
 - [ ] Add structured logging for storage operations (debug level)
 - [ ] Consider caching active sessions to reduce database queries
 
+**Daemon** (`internal/daemon/server.go`):
+- [ ] Add structured logging instead of log.Printf
+- [ ] Consider adding metrics (events processed, connections, errors)
+- [ ] Extract message routing logic into separate handler registry
+- [ ] Add connection timeout configuration
+- [ ] Consider response protocol (ACK messages for clients)
+- [ ] Add connection pooling limits to prevent resource exhaustion
+- [ ] HTTP listener implementation for Windows compatibility (Phase 2+)
+
 **Git Module** (`internal/git/cli_provider.go`):
 - [ ] Extract common git command execution logic
 - [ ] Add context support for command cancellation
@@ -252,6 +269,53 @@ Track technical debt and future improvements:
 2. Real-world usage patterns
 3. Performance profiling data
 4. User feedback on git command overhead
+
+### Design Patterns Established
+
+**Ready Channel Pattern** (introduced in daemon implementation):
+```go
+type AsyncComponent struct {
+    ready chan struct{}
+}
+
+func (c *AsyncComponent) Ready() <-chan struct{} {
+    return c.ready
+}
+
+func (c *AsyncComponent) Start() error {
+    // ... setup work
+    close(c.ready)  // Signal ready
+    // ... continue
+}
+```
+
+**Benefits**:
+- Tests synchronize instantly (no arbitrary sleeps)
+- Deterministic (no race conditions)
+- Self-documenting (clear when component is ready)
+- Better error messages (timeouts show what we're waiting for)
+
+**Apply to future async components**:
+- Session manager background goroutines
+- Batch writer flush loops
+- HTTP server startup
+- Any long-running background tasks
+
+**Test Helper Pattern** (polling with timeout):
+```go
+func waitForCondition(t *testing.T, check func() bool, timeout time.Duration) {
+    deadline := time.Now().Add(timeout)
+    for time.Now().Before(deadline) {
+        if check() {
+            return
+        }
+        time.Sleep(10 * time.Millisecond)
+    }
+    t.Fatal("condition not met within timeout")
+}
+```
+
+Used in: `waitForEvent()`, `waitForSession()`, `waitForEventCount()`
 
 ---
 
@@ -732,4 +796,4 @@ provenance/
 
 ---
 
-*Last updated: 2025-12-28 - Event storage implementation complete (Phase 0)*
+*Last updated: 2025-12-29 - Daemon implementation complete (Phase 0)*
