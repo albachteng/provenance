@@ -60,7 +60,6 @@ type Session struct {
 
 // StorePromptEvent stores a prompt event in the database
 func StorePromptEvent(db *sql.DB, event *PromptEvent) error {
-	// Marshal JSON array fields
 	dirtyFilesJSON, err := json.Marshal(event.DirtyFiles)
 	if err != nil {
 		return fmt.Errorf("failed to marshal dirty_files: %w", err)
@@ -148,10 +147,8 @@ func GetPromptEvent(db *sql.DB, id string) (*PromptEvent, error) {
 		return nil, fmt.Errorf("failed to query prompt event: %w", err)
 	}
 
-	// Convert Unix timestamp to time.Time
 	event.Timestamp = time.Unix(timestampUnix, 0)
 
-	// Unmarshal JSON array fields
 	if err := json.Unmarshal([]byte(dirtyFilesJSON), &event.DirtyFiles); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal dirty_files: %w", err)
 	}
@@ -210,10 +207,8 @@ func ListPromptEvents(db *sql.DB, sessionID string) ([]*PromptEvent, error) {
 			return nil, fmt.Errorf("failed to scan prompt event: %w", err)
 		}
 
-		// Convert Unix timestamp to time.Time
 		event.Timestamp = time.Unix(timestampUnix, 0)
 
-		// Unmarshal JSON array fields
 		if err := json.Unmarshal([]byte(dirtyFilesJSON), &event.DirtyFiles); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal dirty_files: %w", err)
 		}
@@ -294,7 +289,6 @@ func GetActiveSession(db *sql.DB, repoPath string) (*Session, error) {
 		return nil, fmt.Errorf("failed to query active session: %w", err)
 	}
 
-	// Convert Unix timestamps
 	session.StartTime = time.Unix(startTimeUnix, 0)
 	if endTimeUnix != nil {
 		endTime := time.Unix(*endTimeUnix, 0)
