@@ -14,6 +14,30 @@ import (
 	"github.com/albachteng/provenance/internal/storage"
 )
 
+var testBinary string
+
+// TestMain builds the CLI binary once for all tests
+func TestMain(m *testing.M) {
+	// Build the binary once
+	tmpDir, err := os.MkdirTemp("", "prov-test-binary-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create temp dir: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	testBinary = filepath.Join(tmpDir, "prov-test")
+	cmd := exec.Command("go", "build", "-o", testBinary, ".")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to build CLI: %v\nOutput: %s\n", err, output)
+		os.Exit(1)
+	}
+
+	// Run tests
+	code := m.Run()
+	os.Exit(code)
+}
+
 func TestCLIVersion(t *testing.T) {
 	output, err := runCLI(t, "version")
 	if err != nil {
@@ -53,7 +77,7 @@ func TestCLIDaemonStop(t *testing.T) {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	output, err := runCLI(t, "daemon", "stop")
 	if err != nil {
@@ -83,7 +107,7 @@ func TestCLIDaemonStatus(t *testing.T) {
 	}
 	defer runCLI(t, "daemon", "stop")
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	output, err = runCLI(t, "daemon", "status")
 	if err != nil {
@@ -291,9 +315,7 @@ func createTestEvent(t *testing.T, db *sql.DB, eventID, sessionID, promptText st
 func runCLI(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 
-	binary := buildCLI(t)
-
-	cmd := exec.Command(binary, args...)
+	cmd := exec.Command(testBinary, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -306,19 +328,4 @@ func runCLI(t *testing.T, args ...string) (string, error) {
 	}
 
 	return output, err
-}
-
-func buildCLI(t *testing.T) string {
-	t.Helper()
-
-	binary := filepath.Join(t.TempDir(), "prov-test")
-
-	cmd := exec.Command("go", "build", "-o", binary, ".")
-	cmd.Dir = filepath.Join(".") // Current directory (cmd/prov)
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("Failed to build CLI: %v\nOutput: %s", err, output)
-	}
-
-	return binary
 }

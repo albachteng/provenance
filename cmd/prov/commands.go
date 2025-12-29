@@ -171,7 +171,7 @@ func listEvents(limit int) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	// Get all events (we'll implement proper querying later)
 	// For now, get events from all sessions
@@ -227,7 +227,7 @@ func showEvent(eventID string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	event, err := storage.GetPromptEvent(db, eventID)
 	if err != nil {
@@ -280,7 +280,7 @@ func searchEvents(query string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	// Simple search in prompt_text and response_text
 	rows, err := db.Query(`
