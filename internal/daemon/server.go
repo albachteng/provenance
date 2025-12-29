@@ -31,8 +31,8 @@ type Daemon struct {
 
 // SessionEvent represents a session lifecycle event
 type SessionEvent struct {
-	Type    string           `json:"type"` // "session_start" | "session_end"
-	Session storage.Session  `json:"session"`
+	Type    string          `json:"type"` // "session_start" | "session_end"
+	Session storage.Session `json:"session"`
 }
 
 // NewDaemon creates a new daemon instance
@@ -59,22 +59,18 @@ func (d *Daemon) Ready() <-chan struct{} {
 
 // Start starts the daemon and begins accepting connections
 func (d *Daemon) Start() error {
-	// Remove existing socket file if it exists
 	if err := os.Remove(d.socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove existing socket: %w", err)
 	}
 
-	// Create Unix socket listener
 	listener, err := net.Listen("unix", d.socketPath)
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
 	d.listener = listener
 
-	// Signal that daemon is ready
 	close(d.ready)
 
-	// Accept connections until shutdown
 	for {
 		select {
 		case <-d.shutdown:
@@ -117,21 +113,17 @@ func (d *Daemon) Stop() error {
 		return nil
 	}
 	d.stopped = true
-	// Signal shutdown while holding mutex to avoid race
 	close(d.shutdown)
 	d.mu.Unlock()
 
-	// Close listener to stop accepting new connections
 	if d.listener != nil {
 		if err := d.listener.Close(); err != nil {
 			log.Printf("error closing listener: %v", err)
 		}
 	}
 
-	// Wait for active connections to finish
 	d.wg.Wait()
 
-	// Clean up socket file
 	if err := os.Remove(d.socketPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("failed to remove socket file: %v", err)
 	}
@@ -144,7 +136,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	defer d.wg.Done()
 	defer conn.Close()
 
-	// Read entire message into buffer
 	var buf []byte
 	tmp := make([]byte, 4096)
 	for {
@@ -177,7 +168,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	}
 
 	if typeCheck.Type != "" {
-		// This is a SessionEvent
 		var sessionEvent SessionEvent
 		if err := json.Unmarshal(buf, &sessionEvent); err != nil {
 			log.Printf("failed to decode session event: %v", err)
@@ -188,7 +178,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			log.Printf("failed to handle session event: %v", err)
 		}
 	} else {
-		// This is a PromptEvent
 		var event storage.PromptEvent
 		if err := json.Unmarshal(buf, &event); err != nil {
 			log.Printf("failed to decode prompt event: %v", err)
