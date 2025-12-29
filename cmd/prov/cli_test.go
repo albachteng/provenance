@@ -18,7 +18,6 @@ var testBinary string
 
 // TestMain builds the CLI binary once for all tests
 func TestMain(m *testing.M) {
-	// Build the binary once
 	tmpDir, err := os.MkdirTemp("", "prov-test-binary-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create temp dir: %v\n", err)
@@ -33,7 +32,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Run tests
 	code := m.Run()
 	os.Exit(code)
 }

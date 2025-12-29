@@ -132,7 +132,6 @@ func daemonRun() {
 	socketPath := getSocketPath()
 	pidFile := filepath.Join(getProvenanceHome(), "daemon.pid")
 
-	// Ensure provenance home directory exists
 	if err := os.MkdirAll(getProvenanceHome(), 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create provenance home: %v\n", err)
 		os.Exit(1)
@@ -145,7 +144,6 @@ func daemonRun() {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Write PID file
 	pid := os.Getpid()
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write PID file: %v\n", err)
@@ -282,7 +280,6 @@ func searchEvents(query string) error {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Simple search in prompt_text and response_text
 	rows, err := db.Query(`
 		SELECT id, timestamp, session_id, agent, prompt_text
 		FROM prompt_events
@@ -336,7 +333,6 @@ func searchEvents(query string) error {
 func openDB() (*sql.DB, error) {
 	dbPath := getDBPath()
 
-	// Check if database exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("database not initialized (run 'prov init' first)")
 	}
