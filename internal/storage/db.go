@@ -15,13 +15,11 @@ import (
 // InitDatabase creates or opens a SQLite database at the specified path,
 // runs migrations, and enables WAL mode for concurrent access.
 func InitDatabase(dbPath string) (*sql.DB, error) {
-	// Ensure parent directory exists
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open database connection
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -39,19 +37,16 @@ func InitDatabase(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to set database permissions: %w", err)
 	}
 
-	// Enable WAL mode for concurrent read/write
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
 	}
 
-	// Enable foreign key constraints
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
-	// Run migrations
 	if err := runMigrations(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
@@ -62,19 +57,16 @@ func InitDatabase(dbPath string) (*sql.DB, error) {
 
 // runMigrations applies database migrations using golang-migrate
 func runMigrations(db *sql.DB) error {
-	// Create migrate driver
 	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	// Find migrations directory
 	migrationsPath, err := findMigrationsPath()
 	if err != nil {
 		return fmt.Errorf("failed to find migrations directory: %w", err)
 	}
 
-	// Create migrate instance
 	m, err := migrate.NewWithDatabaseInstance(
 		"file://"+migrationsPath,
 		"sqlite3",
@@ -84,7 +76,6 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("failed to create migrate instance: %w", err)
 	}
 
-	// Run migrations
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
