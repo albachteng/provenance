@@ -1,13 +1,15 @@
-# Binaries
-/prov
+# Binaries (anywhere in repo)
+prov
+server
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binaries
+# Test binaries and integration test artifacts
 *.test
+*.test.exe
 
 # Coverage
 *.out
