@@ -94,7 +94,7 @@ func cmdDaemon() {
 func cmdList() {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	limit := fs.Int("limit", 10, "Number of events to show")
-	fs.Parse(os.Args[2:])
+	fs.Parse(os.Args[2:]) //nolint:errcheck
 
 	if err := listEvents(*limit); err != nil {
 		fmt.Fprintf(os.Stderr, "Error listing events: %v\n", err)

@@ -122,7 +122,7 @@ func isDaemonRunning(socketPath string) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	conn.Close() //nolint:errcheck
 	return true
 }
 
