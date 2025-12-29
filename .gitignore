@@ -1,13 +1,16 @@
-# Binaries (anywhere in repo)
-prov
-server
+# Binaries (specific locations, not source directories)
+/prov
+/cmd/prov/prov
+/cmd/server/server
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binaries and integration test artifacts
+# Test binaries (compiled test executables, not source files)
+# Go generates test binaries like: daemon.test, storage.test
+# These have .test extension but *_test.go source files have .go extension
 *.test
 *.test.exe
 
