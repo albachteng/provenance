@@ -164,6 +164,7 @@ CREATE TABLE sessions (
   - [x] SQLite schema + migrations (using golang-migrate)
   - [x] Write-ahead logging (WAL) mode
   - [x] Database initialization with proper permissions
+  - [x] Event storage implementation (PromptEvent and Session CRUD)
   - [ ] Accepts JSON events via socket (HTTP fallback for Windows compatibility)
   - [ ] Graceful shutdown (flush buffers)
   - [ ] Session management (auto-start, timeout-based end)
@@ -211,6 +212,9 @@ CREATE TABLE sessions (
 - [x] All schema tests passing (4/4)
 - [x] Git state accurately captured in test repos (14/14 tests)
 - [x] Edge cases handled (detached HEAD, merge conflicts, submodules, etc.)
+- [x] Event storage CRUD operations implemented and tested (10/10 tests)
+- [x] JSON array fields properly serialized/deserialized
+- [x] Foreign key constraints validated
 - [ ] Can start daemon, send event via socket, query it back via CLI
 - [ ] Daemon survives crashes (WAL recovery)
 - [ ] Sessions auto-start and timeout correctly
@@ -226,6 +230,14 @@ Track technical debt and future improvements:
 - [ ] Make migration path detection more robust (env var override?)
 - [ ] Review SQLite connection pool settings for optimal performance
 - [ ] Consider adding database health checks endpoint
+
+**Event Storage** (`internal/storage/events.go`):
+- [ ] Extract repeated JSON marshaling logic into helper functions
+- [ ] Consider using prepared statements pool for frequently-executed queries
+- [ ] Add batch insert operations for high-throughput scenarios
+- [ ] Implement pagination for ListPromptEvents to handle large result sets
+- [ ] Add structured logging for storage operations (debug level)
+- [ ] Consider caching active sessions to reduce database queries
 
 **Git Module** (`internal/git/cli_provider.go`):
 - [ ] Extract common git command execution logic
@@ -720,4 +732,4 @@ provenance/
 
 ---
 
-*Last updated: 2025-12-28*
+*Last updated: 2025-12-28 - Event storage implementation complete (Phase 0)*
