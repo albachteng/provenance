@@ -20,26 +20,22 @@ import (
 func daemonStart() {
 	socketPath := getSocketPath()
 
-	// Check if daemon is already running
 	if isDaemonRunning(socketPath) {
 		fmt.Println("Daemon is already running")
 		return
 	}
 
-	// Get path to current binary
 	self, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get executable path: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Start daemon process in background
 	cmd := exec.Command(self, "daemon", "_run")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 
-	// Detach from parent process
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
@@ -49,7 +45,6 @@ func daemonStart() {
 		os.Exit(1)
 	}
 
-	// Wait for daemon to be ready
 	for i := 0; i < 50; i++ {
 		if isDaemonRunning(socketPath) {
 			fmt.Println("Daemon started")
@@ -96,7 +91,6 @@ func daemonStop() {
 		os.Exit(1)
 	}
 
-	// Wait for daemon to stop
 	for i := 0; i < 20; i++ {
 		if !isDaemonRunning(socketPath) {
 			fmt.Println("Daemon stopped")
@@ -144,7 +138,6 @@ func daemonRun() {
 		os.Exit(1)
 	}
 
-	// Initialize database
 	db, err := storage.InitDatabase(dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize database: %v\n", err)
@@ -160,14 +153,12 @@ func daemonRun() {
 	}
 	defer os.Remove(pidFile) //nolint:errcheck
 
-	// Create and start daemon
 	daemon, err := daemon.NewDaemon(db, socketPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create daemon: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Start daemon (blocks until shutdown)
 	if err := daemon.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "Daemon error: %v\n", err)
 		os.Exit(1)
@@ -209,7 +200,6 @@ func listEvents(limit int) error {
 
 		ts := time.Unix(timestamp, 0)
 
-		// Truncate prompt text to fit
 		if len(promptText) > 60 {
 			promptText = promptText[:57] + "..."
 		}
