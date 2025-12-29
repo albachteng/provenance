@@ -12,6 +12,16 @@ func TestStorePromptEvent(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
+	// Create session first (required by foreign key constraint)
+	session := &Session{
+		ID:        "test-session-1",
+		StartTime: time.Now(),
+		RepoPath:  "/home/user/project",
+	}
+	if err := CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
 	event := &PromptEvent{
 		ID:           "test-event-1",
 		Timestamp:    time.Now(),
@@ -59,6 +69,16 @@ func TestStorePromptEvent(t *testing.T) {
 func TestGetPromptEvent(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
+
+	// Create session first (required by foreign key constraint)
+	session := &Session{
+		ID:        "test-session-2",
+		StartTime: time.Now(),
+		RepoPath:  "/home/user/app",
+	}
+	if err := CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 
 	originalEvent := &PromptEvent{
 		ID:           "test-event-2",
@@ -146,6 +166,17 @@ func TestListPromptEvents(t *testing.T) {
 	defer db.Close()
 
 	sessionID := "test-session-3"
+
+	// Create session first (required by foreign key constraint)
+	session := &Session{
+		ID:        sessionID,
+		StartTime: time.Now(),
+		RepoPath:  "/home/user/project",
+	}
+	if err := CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
 	events := []*PromptEvent{
 		{
 			ID:         "event-1",
@@ -202,6 +233,16 @@ func TestListPromptEvents(t *testing.T) {
 func TestStorePromptEventWithJSONFields(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
+
+	// Create session first (required by foreign key constraint)
+	session := &Session{
+		ID:        "test-session-json",
+		StartTime: time.Now(),
+		RepoPath:  "/home/user/complex-project",
+	}
+	if err := CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
 
 	event := &PromptEvent{
 		ID:         "test-event-json",
