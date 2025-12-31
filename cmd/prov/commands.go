@@ -440,7 +440,11 @@ func sendEventToDaemon(agent, promptText string) {
 		gitDirty = gitInfo.IsDirty
 	}
 
-	repoPath, _ := os.Getwd()
+	// Get current directory as repo path, fallback to "unknown" if unavailable
+	repoPath, err := os.Getwd()
+	if err != nil {
+		repoPath = "unknown"
+	}
 
 	author := os.Getenv("USER")
 	if author == "" {
