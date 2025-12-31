@@ -32,7 +32,7 @@ func TestInstallHooksClaudeCode(t *testing.T) {
 		t.Errorf("Expected success message, got: %s", output)
 	}
 
-	hooksDir := filepath.Join(tmpDir, ".ai-provenance", "hooks")
+	hooksDir := filepath.Join(tmpDir, "hooks")
 	expectedScripts := []string{
 		"claude-prompt.py",
 		"claude-tool-pre.py",
@@ -309,7 +309,7 @@ func TestCaptureHookToolUse(t *testing.T) {
 func TestHooksStatus(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 
-	hooksDir := filepath.Join(tmpDir, ".ai-provenance", "hooks")
+	hooksDir := filepath.Join(tmpDir, "hooks")
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		t.Fatalf("Failed to create hooks dir: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestHooksStatusNoHooks(t *testing.T) {
 func TestUninstallHooks(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 
-	hooksDir := filepath.Join(tmpDir, ".ai-provenance", "hooks")
+	hooksDir := filepath.Join(tmpDir, "hooks")
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		t.Fatalf("Failed to create hooks dir: %v", err)
 	}

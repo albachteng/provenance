@@ -505,3 +505,392 @@ func sendMessageToDaemon(socketPath string, message interface{}) {
 func generateEventID() string {
 	return fmt.Sprintf("evt-%d-%d", time.Now().Unix(), time.Now().UnixNano()%1000000)
 }
+
+func installHooks(agent string) error {
+	if agent != "claude-code" {
+		return fmt.Errorf("agent '%s' not supported (supported: claude-code)", agent)
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	hooksDir := filepath.Join(getProvenanceHome(), "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("failed to create hooks directory: %w", err)
+	}
+
+	scripts := map[string]string{
+		"claude-prompt.py":     claudePromptHookScript,
+		"claude-tool-pre.py":   claudeToolPreHookScript,
+		"claude-tool-post.py":  claudeToolPostHookScript,
+		"claude-session.py":    claudeSessionHookScript,
+	}
+
+	for name, content := range scripts {
+		scriptPath := filepath.Join(hooksDir, name)
+		if err := os.WriteFile(scriptPath, []byte(content), 0755); err != nil {
+			return fmt.Errorf("failed to write hook script %s: %w", name, err)
+		}
+	}
+
+	claudeDir := filepath.Join(homeDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .claude directory: %w", err)
+	}
+
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+
+	var settings map[string]interface{}
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to read settings.json: %w", err)
+		}
+		settings = make(map[string]interface{})
+	} else {
+		if err := json.Unmarshal(settingsData, &settings); err != nil {
+			return fmt.Errorf("failed to parse settings.json: %w", err)
+		}
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		hooks = make(map[string]interface{})
+		settings["hooks"] = hooks
+	}
+
+	promptScript := filepath.Join(hooksDir, "claude-prompt.py")
+	toolPreScript := filepath.Join(hooksDir, "claude-tool-pre.py")
+	toolPostScript := filepath.Join(hooksDir, "claude-tool-post.py")
+
+	hooks["UserPromptSubmit"] = []interface{}{
+		map[string]interface{}{
+			"hooks": []interface{}{
+				map[string]interface{}{
+					"type":    "command",
+					"command": promptScript,
+				},
+			},
+		},
+	}
+
+	hooks["PreToolUse"] = []interface{}{
+		map[string]interface{}{
+			"matcher": "*",
+			"hooks": []interface{}{
+				map[string]interface{}{
+					"type":    "command",
+					"command": toolPreScript,
+				},
+			},
+		},
+	}
+
+	hooks["PostToolUse"] = []interface{}{
+		map[string]interface{}{
+			"matcher": "*",
+			"hooks": []interface{}{
+				map[string]interface{}{
+					"type":    "command",
+					"command": toolPostScript,
+				},
+			},
+		},
+	}
+
+	updatedSettings, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	if err := os.WriteFile(settingsPath, updatedSettings, 0644); err != nil {
+		return fmt.Errorf("failed to write settings.json: %w", err)
+	}
+
+	fmt.Println("Claude Code hooks installed successfully")
+	fmt.Printf("Hook scripts: %s\n", hooksDir)
+	fmt.Printf("Settings updated: %s\n", settingsPath)
+
+	return nil
+}
+
+func captureHook() error {
+	var hookInput map[string]interface{}
+	decoder := json.NewDecoder(os.Stdin)
+	if err := decoder.Decode(&hookInput); err != nil {
+		return fmt.Errorf("failed to decode JSON from stdin: %w", err)
+	}
+
+	eventName, _ := hookInput["hook_event_name"].(string)
+	sessionID, _ := hookInput["session_id"].(string)
+	cwd, _ := hookInput["cwd"].(string)
+
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+		if cwd == "" {
+			cwd = "unknown"
+		}
+	}
+
+	var promptText string
+	var gitCommit, gitBranch string
+	var gitDirty bool
+
+	gitInfo, err := git.CaptureGitState(cwd)
+	if err == nil {
+		gitCommit = gitInfo.Head
+		gitBranch = gitInfo.Branch
+		gitDirty = gitInfo.IsDirty
+	}
+
+	switch eventName {
+	case "UserPromptSubmit":
+		promptText, _ = hookInput["prompt"].(string)
+	case "PreToolUse", "PostToolUse":
+		toolName, _ := hookInput["tool_name"].(string)
+		toolInput, _ := hookInput["tool_input"].(map[string]interface{})
+		toolInputJSON, _ := json.Marshal(toolInput)
+		promptText = fmt.Sprintf("%s: %s", toolName, string(toolInputJSON))
+	default:
+		promptText = eventName
+	}
+
+	author := os.Getenv("USER")
+	if author == "" {
+		author = "unknown"
+	}
+
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("session-%s", filepath.Base(cwd))
+	}
+
+	socketPath := getSocketPath()
+
+	sessionEvent := struct {
+		Type    string          `json:"type"`
+		Session storage.Session `json:"session"`
+	}{
+		Type: "session_start",
+		Session: storage.Session{
+			ID:        sessionID,
+			StartTime: time.Now(),
+			RepoPath:  cwd,
+		},
+	}
+	sendMessageToDaemon(socketPath, sessionEvent)
+
+	event := storage.PromptEvent{
+		ID:         generateEventID(),
+		Timestamp:  time.Now(),
+		SessionID:  sessionID,
+		Agent:      "claude-code",
+		PromptText: promptText,
+		RepoPath:   cwd,
+		GitCommit:  gitCommit,
+		GitBranch:  gitBranch,
+		GitDirty:   gitDirty,
+		Author:     author,
+		IDE:        "claude-code",
+	}
+
+	sendMessageToDaemon(socketPath, event)
+
+	return nil
+}
+
+func hooksStatus() error {
+	hooksDir := filepath.Join(getProvenanceHome(), "hooks")
+
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No hooks installed")
+			return nil
+		}
+		return fmt.Errorf("failed to read hooks directory: %w", err)
+	}
+
+	claudeHooks := []string{}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "claude-") && strings.HasSuffix(entry.Name(), ".py") {
+			claudeHooks = append(claudeHooks, entry.Name())
+		}
+	}
+
+	if len(claudeHooks) == 0 {
+		fmt.Println("No hooks installed")
+		return nil
+	}
+
+	fmt.Println("Installed hooks:")
+	fmt.Println()
+	fmt.Println("claude-code:")
+	for _, hook := range claudeHooks {
+		fmt.Printf("  - %s\n", hook)
+	}
+
+	return nil
+}
+
+func uninstallHooks(agent string) error {
+	if agent != "claude-code" {
+		return fmt.Errorf("agent '%s' not supported (supported: claude-code)", agent)
+	}
+
+	hooksDir := filepath.Join(getProvenanceHome(), "hooks")
+
+	scripts := []string{
+		"claude-prompt.py",
+		"claude-tool-pre.py",
+		"claude-tool-post.py",
+		"claude-session.py",
+	}
+
+	for _, script := range scripts {
+		scriptPath := filepath.Join(hooksDir, script)
+		if err := os.Remove(scriptPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove hook script %s: %w", script, err)
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	settingsPath := filepath.Join(homeDir, ".claude", "settings.json")
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("Claude Code hooks uninstalled")
+			return nil
+		}
+		return fmt.Errorf("failed to read settings.json: %w", err)
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(settingsData, &settings); err != nil {
+		return fmt.Errorf("failed to parse settings.json: %w", err)
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if ok {
+		delete(hooks, "UserPromptSubmit")
+		delete(hooks, "PreToolUse")
+		delete(hooks, "PostToolUse")
+	}
+
+	updatedSettings, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	if err := os.WriteFile(settingsPath, updatedSettings, 0644); err != nil {
+		return fmt.Errorf("failed to write settings.json: %w", err)
+	}
+
+	fmt.Println("Claude Code hooks uninstalled")
+
+	return nil
+}
+
+const claudePromptHookScript = `#!/usr/bin/env python3
+import json
+import sys
+import subprocess
+
+hook_input = json.load(sys.stdin)
+
+event = {
+    'hook_event_name': hook_input.get('hook_event_name'),
+    'session_id': hook_input.get('session_id'),
+    'prompt': hook_input.get('prompt'),
+    'cwd': hook_input.get('cwd'),
+    'permission_mode': hook_input.get('permission_mode'),
+    'transcript_path': hook_input.get('transcript_path'),
+}
+
+try:
+    subprocess.run(
+        ['prov', 'capture-hook', '--json'],
+        input=json.dumps(event),
+        text=True,
+        check=False,
+        capture_output=True
+    )
+except Exception:
+    pass
+
+sys.exit(0)
+`
+
+const claudeToolPreHookScript = `#!/usr/bin/env python3
+import json
+import sys
+import subprocess
+
+hook_input = json.load(sys.stdin)
+
+event = {
+    'hook_event_name': 'PreToolUse',
+    'session_id': hook_input.get('session_id'),
+    'tool_name': hook_input.get('tool_name'),
+    'tool_use_id': hook_input.get('tool_use_id'),
+    'tool_input': hook_input.get('tool_input'),
+    'cwd': hook_input.get('cwd'),
+    'permission_mode': hook_input.get('permission_mode'),
+}
+
+try:
+    subprocess.run(
+        ['prov', 'capture-hook', '--json'],
+        input=json.dumps(event),
+        text=True,
+        check=False,
+        capture_output=True
+    )
+except Exception:
+    pass
+
+sys.exit(0)
+`
+
+const claudeToolPostHookScript = `#!/usr/bin/env python3
+import json
+import sys
+import subprocess
+
+hook_input = json.load(sys.stdin)
+
+event = {
+    'hook_event_name': 'PostToolUse',
+    'session_id': hook_input.get('session_id'),
+    'tool_name': hook_input.get('tool_name'),
+    'tool_use_id': hook_input.get('tool_use_id'),
+    'tool_input': hook_input.get('tool_input'),
+    'tool_response': hook_input.get('tool_response'),
+    'cwd': hook_input.get('cwd'),
+}
+
+try:
+    subprocess.run(
+        ['prov', 'capture-hook', '--json'],
+        input=json.dumps(event),
+        text=True,
+        check=False,
+        capture_output=True
+    )
+except Exception:
+    pass
+
+sys.exit(0)
+`
+
+const claudeSessionHookScript = `#!/usr/bin/env python3
+import json
+import sys
+
+sys.exit(0)
+`
