@@ -406,22 +406,17 @@ function prov_ai_wrapper() {
 
 // wrapCommand wraps a command execution and captures it for provenance tracking
 func wrapCommand(agent, command string, args []string) int {
-	// Build the command to execute
 	cmd := exec.Command(command, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Capture the prompt (command + args as a simple prompt)
 	promptText := strings.Join(append([]string{command}, args...), " ")
 
-	// Execute the command
 	err := cmd.Run()
 
-	// Send event to daemon (best effort, don't fail if daemon not running)
 	sendEventToDaemon(agent, promptText)
 
-	// Return exit code
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode()
@@ -436,7 +431,6 @@ func wrapCommand(agent, command string, args []string) int {
 func sendEventToDaemon(agent, promptText string) {
 	socketPath := getSocketPath()
 
-	// Get git context
 	var gitCommit, gitBranch string
 	var gitDirty bool
 	gitInfo, err := git.CaptureGitState(".")
@@ -446,10 +440,8 @@ func sendEventToDaemon(agent, promptText string) {
 		gitDirty = gitInfo.IsDirty
 	}
 
-	// Get current directory as repo path
 	repoPath, _ := os.Getwd()
 
-	// Get username
 	author := os.Getenv("USER")
 	if author == "" {
 		author = "unknown"
@@ -473,7 +465,6 @@ func sendEventToDaemon(agent, promptText string) {
 	}
 	sendMessageToDaemon(socketPath, sessionEvent)
 
-	// Create PromptEvent matching storage.PromptEvent structure
 	// Note: No "type" field - daemon routes based on absence of "type"
 	event := storage.PromptEvent{
 		ID:         generateEventID(),

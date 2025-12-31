@@ -71,12 +71,10 @@ func TestCommandWrapper(t *testing.T) {
 		t.Fatalf("wrap command failed: %v", err)
 	}
 
-	// Should pass through command output
 	if !strings.Contains(output, "test prompt") {
 		t.Errorf("Expected command output to be passed through, got: %s", output)
 	}
 
-	// Poll for event to appear in database
 	waitForEventInDB(t, db, func(agent, promptText string) bool {
 		return agent == "claude-code" && strings.Contains(promptText, "test prompt")
 	})
@@ -137,7 +135,6 @@ func TestSessionCreation(t *testing.T) {
 		t.Fatalf("wrap command failed: %v", err)
 	}
 
-	// Poll for session to be created
 	waitForSessionInDB(t, db)
 
 	rows, err := db.Query(`
@@ -201,7 +198,6 @@ func TestSessionLinking(t *testing.T) {
 	runCLI(t, "wrap", "claude-code", "echo", "first prompt")
 	runCLI(t, "wrap", "claude-code", "echo", "second prompt")
 
-	// Poll for both events to appear
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var count int
