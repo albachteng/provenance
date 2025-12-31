@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: Phase 1 complete - daemon, CLI, and shell hooks functional. You can now capture and query AI interactions! See `ROADMAP.md` for development plans.
+> **Status**: Phase 2A complete - Claude Code hooks installed! Automatically capture all your Claude interactions. See `ROADMAP.md` for development plans.
 
 ## Quick Start
 
@@ -36,7 +36,46 @@ The daemon:
 
 ### Capture AI Tool Usage
 
-**Option 1: Shell Hook (Recommended)**
+**Option 1: Claude Code Hooks (Automatic)**
+
+For Claude Code users, install hooks to automatically capture all interactions:
+
+```bash
+./prov install-hooks claude-code
+```
+
+This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/settings.json`.
+
+**What gets captured:**
+- Every prompt you send to Claude (`UserPromptSubmit`)
+- All tool invocations (Read, Write, Edit, Bash, etc.) with inputs/outputs
+- Session context and git state
+- Zero configuration after installation
+
+**Verify installation:**
+```bash
+./prov hooks status
+
+# Output:
+# Installed hooks:
+#
+# claude-code:
+#   - claude-prompt.py
+#   - claude-tool-pre.py
+#   - claude-tool-post.py
+#   - claude-session.py
+```
+
+**Uninstall (if needed):**
+```bash
+./prov hooks uninstall claude-code
+```
+
+**Using with multiple Claude projects:**
+
+The hooks are installed globally for your user. Every Claude Code project will automatically capture events to the same database. To view events for a specific project, navigate to that directory and run `./prov list`.
+
+**Option 2: Shell Hook (For CLI Tools)**
 
 Add provenance tracking to your shell:
 
@@ -54,7 +93,7 @@ alias aider='prov wrap aider aider'
 
 Now when you run `ai "your prompt"`, it automatically captures the interaction.
 
-**Option 2: Direct Wrapper**
+**Option 3: Direct Wrapper**
 
 Manually wrap AI commands:
 
@@ -99,15 +138,17 @@ export AI_PROVENANCE_HOME=/custom/path
 
 ## Try It Out
 
-Here's a complete example:
+### With Claude Code
 
 ```bash
 # Build and start daemon
 go build -o prov ./cmd/prov
 ./prov daemon start
 
-# Wrap a command to track it
-./prov wrap claude-code echo "Implement user authentication"
+# Install Claude Code hooks (one-time setup)
+./prov install-hooks claude-code
+
+# Now use Claude Code normally - all interactions are captured automatically!
 
 # View captured events
 ./prov list
@@ -115,15 +156,30 @@ go build -o prov ./cmd/prov
 # Output:
 # ID                   Timestamp            Agent           Prompt
 # ----------------------------------------------------------------------------------------------------
-# evt-1735567890-12345 2025-12-30 10:30:00 claude-code     echo Implement user authentication
+# evt-1735567890-12345 2025-12-30 10:30:00 claude-code     Implement user authentication
+# evt-1735567891-67890 2025-12-30 10:30:05 claude-code     Edit: {"file_path":"auth.go",...}
 #
-# Showing 1 event(s)
+# Showing 2 event(s)
 
 # See detailed event info
 ./prov show evt-1735567890-12345
 
 # Search for specific prompts
 ./prov search "authentication"
+```
+
+### With CLI Tools
+
+```bash
+# Build and start daemon
+go build -o prov ./cmd/prov
+./prov daemon start
+
+# Wrap a command to track it
+./prov wrap aider aider --message "Add user authentication"
+
+# View captured events
+./prov list
 ```
 
 The captured event includes:
