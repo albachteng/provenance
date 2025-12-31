@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/albachteng/provenance/internal/storage"
@@ -196,7 +197,12 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 func (d *Daemon) handleSessionEvent(event *SessionEvent) error {
 	switch event.Type {
 	case "session_start":
-		return storage.CreateSession(d.db, &event.Session)
+		err := storage.CreateSession(d.db, &event.Session)
+		// Ignore duplicate session errors (idempotent session creation)
+		if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return nil
+		}
+		return err
 	case "session_end":
 		if event.Session.EndTime != nil {
 			return storage.EndSession(d.db, event.Session.ID, *event.Session.EndTime, event.Session.EndedBy)

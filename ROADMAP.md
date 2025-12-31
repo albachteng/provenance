@@ -21,13 +21,13 @@ Create an **open-source, agent-agnostic provenance system** for AI-assisted deve
 ## Architecture Overview
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                    Capture Adapters                    │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
-│  │ VS Code  │  │ Neovim   │  │ CLI Wrap │  │ MCP Srv │ │
-│  │ Extension│  │ Plugin   │  │ (Aider)  │  │ (Claude)│ │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬────┘ │
-└───────┼─────────────┼─────────────┼─────────────┼──────┘
+┌────────────────────────────────────────────────────────────┐
+│                    Capture Adapters                        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐ │
+│  │ Claude   │  │ VS Code  │  │ Neovim   │  │ Shell Hook │ │
+│  │ Hooks    │  │ Extension│  │ Plugin   │  │ (Aider)    │ │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬───────┘ │
+└───────┼─────────────┼─────────────┼─────────────┼─────────┘
         │             │             │             │
         └─────────────┴─────────────┴─────────────┘
                          │
@@ -62,10 +62,11 @@ Create an **open-source, agent-agnostic provenance system** for AI-assisted deve
 |-----------|----------|-----------|
 | Core storage daemon | Go | Fast, single binary, Git integration |
 | CLI tool | Go | Same binary as daemon |
+| Claude Code hooks | Python/Shell | Hook protocol, subprocess execution |
 | VS Code extension | TypeScript | Native to VS Code APIs |
 | Neovim plugin | Lua | Native to Neovim |
-| CLI wrapper | Shell/Python | Portable, easy to test |
-| MCP server (optional) | Python | MCP SDK compatibility |
+| Shell hook (Aider, etc.) | Shell/Python | Portable, easy to test |
+| MCP server (optional) | Python | Query interface for Claude (deferred) |
 
 ---
 
@@ -321,7 +322,60 @@ func (c *AsyncComponent) Start() error {
 - HTTP server startup
 - Any long-running background tasks
 
-**Test Helper Pattern** (polling with timeout):
+**Polling Helper Pattern** (deterministic async testing):
+```go
+func waitForCondition(t *testing.T, check func() bool, timeout time.Duration, message string) {
+    t.Helper()
+    deadline := time.Now().Add(timeout)
+    for time.Now().Before(deadline) {
+        if check() {
+            return
+        }
+        time.Sleep(10 * time.Millisecond)  // Short poll interval
+    }
+    t.Fatalf("%s not met within %v timeout", message, timeout)
+}
+```
+
+**Benefits**:
+- **No arbitrary sleeps**: Tests don't waste time waiting fixed durations
+- **Fast and deterministic**: Succeeds as soon as condition is met
+- **Clear failure messages**: Timeout errors describe what was being waited for
+- **Consistent pattern**: All async tests use same approach
+
+**Examples**:
+```go
+// Wait for daemon socket to exist
+waitForDaemonReady(t, tmpDir)
+
+// Wait for event to appear in database
+waitForEventInDB(t, db, func(agent, promptText string) bool {
+    return agent == "claude-code" && strings.Contains(promptText, "test")
+})
+
+// Wait for session creation
+sessionID := waitForSessionInDB(t, db)
+```
+
+**When to use**:
+- Daemon/server startup (socket creation, port binding)
+- Database operations (async event storage, session creation)
+- File system operations (daemon writes PID file, creates sockets)
+- Any asynchronous side effect verification
+
+**Anti-pattern**:
+```go
+// WRONG: Arbitrary sleep
+time.Sleep(100 * time.Millisecond)
+db.Query(...)  // Might still fail if daemon is slow
+
+// RIGHT: Poll until condition is met
+waitForEventInDB(t, db, checkFunc)
+```
+
+Used in: `daemon/server_test.go`, `cmd/prov/hook_test.go`, all integration tests
+
+**Test Helper Pattern** (polling with timeout - DEPRECATED, use Polling Helper instead):
 ```go
 func waitForCondition(t *testing.T, check func() bool, timeout time.Duration) {
     deadline := time.Now().Add(timeout)
@@ -392,9 +446,134 @@ Used in: `waitForEvent()`, `waitForSession()`, `waitForEventCount()`
 
 ---
 
-## Phase 2: VS Code Extension (Weeks 5-7)
+## Phase 2A: Claude Code Hook Integration (Weeks 5-6)
 
-**Goal**: Support the majority of AI-assisted devs (VS Code users)
+**Goal**: Deep integration with Claude Code via native hooks system
+
+**Research completed**: Claude Code provides comprehensive hook system for capturing interactions
+- Documentation: https://code.claude.com/docs/en/hooks.md
+- Hook events: UserPromptSubmit, PreToolUse, PostToolUse, SessionStart/End
+- Configuration: `.claude/settings.json` (project) or `~/.claude/settings.json` (user)
+
+### Deliverables
+- [ ] **Hook scripts** (Python/Shell):
+  - `UserPromptSubmit` hook: Captures user prompts with session context
+  - `PreToolUse` hook: Logs tool invocations (Read, Write, Edit, Bash, etc.)
+  - `PostToolUse` hook: Logs tool results and outcomes
+  - `SessionStart`/`SessionEnd` hooks: Track session boundaries
+
+- [ ] **Hook implementation example**:
+  ```python
+  #!/usr/bin/env python3
+  # ~/.claude/hooks/capture-prompt.py
+  import json
+  import sys
+  import subprocess
+
+  # Read hook input from stdin
+  hook_input = json.load(sys.stdin)
+
+  # Extract provenance data
+  event = {
+      'agent': 'claude-code',
+      'session_id': hook_input['session_id'],
+      'prompt': hook_input.get('prompt'),
+      'tool_name': hook_input.get('tool_name'),
+      'tool_input': hook_input.get('tool_input'),
+      'cwd': hook_input['cwd'],
+  }
+
+  # Send to prov daemon
+  subprocess.run(['prov', 'capture-hook', '--json'], input=json.dumps(event))
+  sys.exit(0)  # Allow hook to continue
+  ```
+
+- [ ] **Configuration installation**:
+  ```bash
+  prov install-hooks claude-code
+  # Adds hook configuration to ~/.claude/settings.json
+  ```
+
+- [ ] **Hook configuration template**:
+  ```json
+  {
+    "hooks": {
+      "UserPromptSubmit": [{
+        "hooks": [{
+          "type": "command",
+          "command": "~/.ai-provenance/hooks/claude-prompt.py"
+        }]
+      }],
+      "PreToolUse": [{
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "~/.ai-provenance/hooks/claude-tool-pre.py"
+        }]
+      }],
+      "PostToolUse": [{
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "~/.ai-provenance/hooks/claude-tool-post.py"
+        }]
+      }]
+    }
+  }
+  ```
+
+- [ ] **CLI enhancements**:
+  ```bash
+  prov install-hooks claude-code      # Install Claude Code hooks
+  prov capture-hook --json <data>     # Receive hook data from stdin
+  prov hooks status                   # Show installed hooks
+  prov hooks uninstall claude-code    # Remove hooks
+  ```
+
+- [ ] **Enhanced event capture**:
+  - Session transcripts (available at hook input `transcript_path`)
+  - Tool use sequences (chain of Read → Edit → Bash)
+  - Permission mode context (auto, ask, disabled)
+  - Working directory tracking
+
+### Success Criteria
+- After `prov install-hooks claude-code`, all prompts captured automatically
+- Tool invocations logged with inputs and outputs
+- Session boundaries properly tracked
+- Hooks don't block Claude Code execution (<100ms overhead)
+- Works on macOS, Linux, WSL2
+- User can disable via `prov hooks uninstall` or remove from `.claude/settings.json`
+
+### Technical Notes
+**Hook Input Schema** (from Claude Code):
+```json
+{
+  "hook_event_name": "UserPromptSubmit",
+  "session_id": "ses-123",
+  "prompt": "Implement authentication",
+  "cwd": "/path/to/project",
+  "permission_mode": "auto",
+  "transcript_path": "~/.claude/projects/.../session.jsonl"
+}
+```
+
+**Design Decision**: Hooks vs MCP Server
+- **Hooks chosen as primary**: Better coverage (captures prompts, tools, sessions)
+- **MCP server as optional**: Only captures tool invocations Claude makes, misses user prompts
+- Hook scripts send events to daemon via `prov capture-hook` CLI command
+
+**Related Documentation**:
+- Hooks guide: https://code.claude.com/docs/en/hooks-guide.md
+- Hook reference: https://code.claude.com/docs/en/hooks.md
+- MCP integration: https://code.claude.com/docs/en/mcp.md (deferred to optional track)
+
+---
+
+## Phase 2B: Generic VS Code Extension (Weeks 7-9)
+
+**Goal**: Support other AI tools in VS Code (Copilot, Continue, Codeium, etc.)
+
+**Note**: This is separate from Phase 2A Claude Code integration, which uses native hooks
 
 ### Deliverables
 - [ ] **TypeScript extension**:
@@ -592,28 +771,47 @@ Used in: `waitForEvent()`, `waitForSession()`, `waitForEventCount()`
 
 ---
 
-## MCP Server (Optional Track)
+## MCP Server (Optional Track - Deferred)
 
-**Goal**: Support MCP-native tools (Claude Desktop, etc.)
+**Goal**: Provide audit/query capabilities via MCP for Claude to query its own interaction history
 
-### Deliverables
+**Research findings**: MCP servers are **tool providers**, not middleware for observing prompts
+- Cannot intercept or observe prompts/responses at transport layer
+- Can only log tool invocations that Claude makes *through* the MCP server
+- **Better approach**: Use Claude Code hooks (Phase 2A) for comprehensive capture
+
+### Potential Use Case (Future)
+If useful, an MCP server could provide:
+- Query tools for Claude to search its own provenance history
+- Audit tools to check "what prompts modified file X"
+- Statistics tools to report token usage
+
+### Deliverables (if pursued)
 - [ ] **Python MCP server**: `mcp-ai-provenance`
-  - Implements MCP protocol
-  - Logs all tool invocations + prompts
-  - Sends to Go daemon
+  - Provides tools: `query_prompts`, `get_file_history`, `get_session_stats`
+  - Queries local SQLite database
+  - Returns provenance data to Claude
 
 - [ ] **Installation**:
   ```bash
-  prov install-mcp  # Adds to MCP config
+  prov install-mcp  # Adds to ~/.claude/.mcp.json
   ```
 
-- [ ] **Transparent proxying**:
-  - Passes through all requests
-  - Logs metadata without blocking
+- [ ] **Example tool definition**:
+  ```python
+  @mcp.tool()
+  def query_prompts(query: str, limit: int = 10):
+      """Search provenance database for prompts matching query"""
+      # Query local SQLite database
+      # Return results to Claude
+  ```
 
 ### Success Criteria
-- Claude Desktop + MCP server logs prompts automatically
-- Zero latency impact (<5ms overhead)
+- Claude can query its own interaction history via MCP tools
+- Zero latency impact on normal operations
+- Useful for debugging "when did I ask about X?"
+
+**Decision**: Deferred - Phase 2A Claude Code hooks provide comprehensive capture without needing MCP
 
 ---
 
@@ -816,4 +1014,4 @@ provenance/
 
 ---
 
-*Last updated: 2025-12-29 - CLI basics complete, Phase 0 foundation solid (daemon + storage + git + CLI)*
+*Last updated: 2025-12-30 - Phase 1 shell hooks complete, Phase 2A Claude Code integration researched and planned*
