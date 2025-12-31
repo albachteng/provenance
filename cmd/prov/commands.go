@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/albachteng/provenance/internal/daemon"
+	"github.com/albachteng/provenance/internal/git"
 	"github.com/albachteng/provenance/internal/storage"
 )
 
@@ -351,4 +353,155 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// generateHook generates shell hook code for the specified shell
+func generateHook(shell string) error {
+	var template string
+
+	switch shell {
+	case "bash":
+		template = bashHookTemplate
+	case "zsh":
+		template = zshHookTemplate
+	default:
+		return fmt.Errorf("shell '%s' not supported (supported: bash, zsh)", shell)
+	}
+
+	fmt.Println(template)
+	return nil
+}
+
+const bashHookTemplate = `# AI Provenance shell hook for bash
+# Add this to your ~/.bashrc: eval "$(prov hook bash)"
+
+# Wrapper function for AI commands
+function prov_ai_wrapper() {
+    local agent="$1"
+    shift
+    prov wrap "$agent" "$@"
+}
+
+# Example aliases for common AI tools
+# Uncomment and customize as needed:
+# alias claude-code='prov_ai_wrapper claude-code claude-code'
+# alias aider='prov_ai_wrapper aider aider'
+`
+
+const zshHookTemplate = `# AI Provenance shell hook for zsh
+# Add this to your ~/.zshrc: eval "$(prov hook zsh)"
+
+# Wrapper function for AI commands
+function prov_ai_wrapper() {
+    local agent="$1"
+    shift
+    prov wrap "$agent" "$@"
+}
+
+# Example aliases for common AI tools
+# Uncomment and customize as needed:
+# alias claude-code='prov_ai_wrapper claude-code claude-code'
+# alias aider='prov_ai_wrapper aider aider'
+`
+
+// wrapCommand wraps a command execution and captures it for provenance tracking
+func wrapCommand(agent, command string, args []string) int {
+	cmd := exec.Command(command, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	promptText := strings.Join(append([]string{command}, args...), " ")
+
+	err := cmd.Run()
+
+	sendEventToDaemon(agent, promptText)
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode()
+		}
+		return 1
+	}
+
+	return 0
+}
+
+// sendEventToDaemon sends a prompt event to the running daemon
+func sendEventToDaemon(agent, promptText string) {
+	socketPath := getSocketPath()
+
+	var gitCommit, gitBranch string
+	var gitDirty bool
+	gitInfo, err := git.CaptureGitState(".")
+	if err == nil {
+		gitCommit = gitInfo.Head
+		gitBranch = gitInfo.Branch
+		gitDirty = gitInfo.IsDirty
+	}
+
+	// Get current directory as repo path, fallback to "unknown" if unavailable
+	repoPath, err := os.Getwd()
+	if err != nil {
+		repoPath = "unknown"
+	}
+
+	author := os.Getenv("USER")
+	if author == "" {
+		author = "unknown"
+	}
+
+	// Get or create a session for this repo
+	// For now, use a simple session per repo (TODO: proper session management)
+	sessionID := fmt.Sprintf("session-%s", filepath.Base(repoPath))
+
+	// Send session start event first (on separate connection - daemon reads one message per connection)
+	sessionEvent := struct {
+		Type    string          `json:"type"`
+		Session storage.Session `json:"session"`
+	}{
+		Type: "session_start",
+		Session: storage.Session{
+			ID:        sessionID,
+			StartTime: time.Now(),
+			RepoPath:  repoPath,
+		},
+	}
+	sendMessageToDaemon(socketPath, sessionEvent)
+
+	// Note: No "type" field - daemon routes based on absence of "type"
+	event := storage.PromptEvent{
+		ID:         generateEventID(),
+		Timestamp:  time.Now(),
+		SessionID:  sessionID,
+		Agent:      agent,
+		PromptText: promptText,
+		RepoPath:   repoPath,
+		GitCommit:  gitCommit,
+		GitBranch:  gitBranch,
+		GitDirty:   gitDirty,
+		Author:     author,
+		IDE:        "cli",
+	}
+
+	// Send the prompt event (on separate connection)
+	sendMessageToDaemon(socketPath, event)
+}
+
+// sendMessageToDaemon sends a single JSON message to the daemon
+func sendMessageToDaemon(socketPath string, message interface{}) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		// Daemon not running, silently skip
+		return
+	}
+	defer conn.Close() //nolint:errcheck
+
+	encoder := json.NewEncoder(conn)
+	encoder.Encode(message) //nolint:errcheck
+}
+
+// generateEventID creates a unique event ID
+func generateEventID() string {
+	return fmt.Sprintf("evt-%d-%d", time.Now().Unix(), time.Now().UnixNano()%1000000)
 }

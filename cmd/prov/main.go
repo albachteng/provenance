@@ -28,6 +28,10 @@ func main() {
 		cmdVersion()
 	case "daemon":
 		cmdDaemon()
+	case "hook":
+		cmdHook()
+	case "wrap":
+		cmdWrap()
 	case "list":
 		cmdList()
 	case "show":
@@ -128,6 +132,34 @@ func cmdSearch() {
 		fmt.Fprintf(os.Stderr, "Error searching events: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func cmdHook() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov hook <shell>")
+		fmt.Fprintln(os.Stderr, "Supported shells: bash, zsh")
+		os.Exit(1)
+	}
+
+	shell := os.Args[2]
+	if err := generateHook(shell); err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating hook: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdWrap() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "Usage: prov wrap <agent> <command> [args...]")
+		os.Exit(1)
+	}
+
+	agent := os.Args[2]
+	command := os.Args[3]
+	args := os.Args[4:]
+
+	exitCode := wrapCommand(agent, command, args)
+	os.Exit(exitCode)
 }
 
 // getProvenanceHome returns the AI_PROVENANCE_HOME directory
