@@ -32,6 +32,12 @@ func main() {
 		cmdHook()
 	case "wrap":
 		cmdWrap()
+	case "install-hooks":
+		cmdInstallHooks()
+	case "hooks":
+		cmdHooks()
+	case "capture-hook":
+		cmdCaptureHook()
 	case "list":
 		cmdList()
 	case "show":
@@ -160,6 +166,67 @@ func cmdWrap() {
 
 	exitCode := wrapCommand(agent, command, args)
 	os.Exit(exitCode)
+}
+
+func cmdInstallHooks() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov install-hooks <agent>")
+		fmt.Fprintln(os.Stderr, "Supported agents: claude-code")
+		os.Exit(1)
+	}
+
+	agent := os.Args[2]
+	if err := installHooks(agent); err != nil {
+		fmt.Fprintf(os.Stderr, "Error installing hooks: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdHooks() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov hooks <status|uninstall>")
+		os.Exit(1)
+	}
+
+	subcommand := os.Args[2]
+
+	switch subcommand {
+	case "status":
+		if err := hooksStatus(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error showing hooks status: %v\n", err)
+			os.Exit(1)
+		}
+	case "uninstall":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: prov hooks uninstall <agent>")
+			os.Exit(1)
+		}
+		agent := os.Args[3]
+		if err := uninstallHooks(agent); err != nil {
+			fmt.Fprintf(os.Stderr, "Error uninstalling hooks: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown hooks command: %s\n", subcommand)
+		fmt.Fprintln(os.Stderr, "Usage: prov hooks <status|uninstall>")
+		os.Exit(1)
+	}
+}
+
+func cmdCaptureHook() {
+	fs := flag.NewFlagSet("capture-hook", flag.ExitOnError)
+	jsonFlag := fs.Bool("json", false, "Read JSON from stdin")
+	fs.Parse(os.Args[2:]) //nolint:errcheck
+
+	if !*jsonFlag {
+		fmt.Fprintln(os.Stderr, "Usage: prov capture-hook --json")
+		os.Exit(1)
+	}
+
+	if err := captureHook(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error capturing hook: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // getProvenanceHome returns the AI_PROVENANCE_HOME directory
