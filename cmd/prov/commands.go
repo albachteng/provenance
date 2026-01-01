@@ -544,10 +544,10 @@ func installHooks(agent string) error {
 
 	// Replace {{PROV_PATH}} placeholder with actual path
 	scripts := map[string]string{
-		"claude-prompt.py":     strings.ReplaceAll(claudePromptTemplate, "{{PROV_PATH}}", provPath),
-		"claude-tool-pre.py":   strings.ReplaceAll(claudeToolPreTemplate, "{{PROV_PATH}}", provPath),
-		"claude-tool-post.py":  strings.ReplaceAll(claudeToolPostTemplate, "{{PROV_PATH}}", provPath),
-		"claude-session.py":    claudeSessionScript,
+		"claude-prompt.py":    strings.ReplaceAll(claudePromptTemplate, "{{PROV_PATH}}", provPath),
+		"claude-tool-pre.py":  strings.ReplaceAll(claudeToolPreTemplate, "{{PROV_PATH}}", provPath),
+		"claude-tool-post.py": strings.ReplaceAll(claudeToolPostTemplate, "{{PROV_PATH}}", provPath),
+		"claude-session.py":   claudeSessionScript,
 	}
 
 	for name, content := range scripts {
@@ -650,8 +650,9 @@ func captureHook() error {
 	cwd, _ := hookInput["cwd"].(string)
 
 	if cwd == "" {
-		cwd, _ = os.Getwd()
-		if cwd == "" {
+		if dir, err := os.Getwd(); err == nil {
+			cwd = dir
+		} else {
 			cwd = "unknown"
 		}
 	}
@@ -673,8 +674,12 @@ func captureHook() error {
 	case "PreToolUse", "PostToolUse":
 		toolName, _ := hookInput["tool_name"].(string)
 		toolInput, _ := hookInput["tool_input"].(map[string]interface{})
-		toolInputJSON, _ := json.Marshal(toolInput)
-		promptText = fmt.Sprintf("%s: %s", toolName, string(toolInputJSON))
+		toolInputJSON, err := json.Marshal(toolInput)
+		if err != nil {
+			promptText = fmt.Sprintf("%s: <marshal error>", toolName)
+		} else {
+			promptText = fmt.Sprintf("%s: %s", toolName, string(toolInputJSON))
+		}
 	default:
 		promptText = eventName
 	}
@@ -817,4 +822,3 @@ func uninstallHooks(agent string) error {
 
 	return nil
 }
-
