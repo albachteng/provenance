@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -17,6 +18,20 @@ import (
 	"github.com/albachteng/provenance/internal/git"
 	"github.com/albachteng/provenance/internal/storage"
 )
+
+// Embedded hook script templates
+//
+//go:embed hooks/claude-prompt.py
+var claudePromptTemplate string
+
+//go:embed hooks/claude-tool-pre.py
+var claudeToolPreTemplate string
+
+//go:embed hooks/claude-tool-post.py
+var claudeToolPostTemplate string
+
+//go:embed hooks/claude-session.py
+var claudeSessionScript string
 
 // daemonStart starts the daemon in the background
 func daemonStart() {
@@ -527,11 +542,12 @@ func installHooks(agent string) error {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
+	// Replace {{PROV_PATH}} placeholder with actual path
 	scripts := map[string]string{
-		"claude-prompt.py":     generateClaudePromptHookScript(provPath),
-		"claude-tool-pre.py":   generateClaudeToolPreHookScript(provPath),
-		"claude-tool-post.py":  generateClaudeToolPostHookScript(provPath),
-		"claude-session.py":    claudeSessionHookScript,
+		"claude-prompt.py":     strings.ReplaceAll(claudePromptTemplate, "{{PROV_PATH}}", provPath),
+		"claude-tool-pre.py":   strings.ReplaceAll(claudeToolPreTemplate, "{{PROV_PATH}}", provPath),
+		"claude-tool-post.py":  strings.ReplaceAll(claudeToolPostTemplate, "{{PROV_PATH}}", provPath),
+		"claude-session.py":    claudeSessionScript,
 	}
 
 	for name, content := range scripts {
@@ -802,107 +818,3 @@ func uninstallHooks(agent string) error {
 	return nil
 }
 
-func generateClaudePromptHookScript(provPath string) string {
-	return fmt.Sprintf(`#!/usr/bin/env python3
-import json
-import sys
-import subprocess
-
-hook_input = json.load(sys.stdin)
-
-event = {
-    'hook_event_name': hook_input.get('hook_event_name'),
-    'session_id': hook_input.get('session_id'),
-    'prompt': hook_input.get('prompt'),
-    'cwd': hook_input.get('cwd'),
-    'permission_mode': hook_input.get('permission_mode'),
-    'transcript_path': hook_input.get('transcript_path'),
-}
-
-try:
-    subprocess.run(
-        ['%s', 'capture-hook', '--json'],
-        input=json.dumps(event),
-        text=True,
-        check=False,
-        capture_output=True
-    )
-except Exception:
-    pass
-
-sys.exit(0)
-`, provPath)
-}
-
-func generateClaudeToolPreHookScript(provPath string) string {
-	return fmt.Sprintf(`#!/usr/bin/env python3
-import json
-import sys
-import subprocess
-
-hook_input = json.load(sys.stdin)
-
-event = {
-    'hook_event_name': 'PreToolUse',
-    'session_id': hook_input.get('session_id'),
-    'tool_name': hook_input.get('tool_name'),
-    'tool_use_id': hook_input.get('tool_use_id'),
-    'tool_input': hook_input.get('tool_input'),
-    'cwd': hook_input.get('cwd'),
-    'permission_mode': hook_input.get('permission_mode'),
-}
-
-try:
-    subprocess.run(
-        ['%s', 'capture-hook', '--json'],
-        input=json.dumps(event),
-        text=True,
-        check=False,
-        capture_output=True
-    )
-except Exception:
-    pass
-
-sys.exit(0)
-`, provPath)
-}
-
-func generateClaudeToolPostHookScript(provPath string) string {
-	return fmt.Sprintf(`#!/usr/bin/env python3
-import json
-import sys
-import subprocess
-
-hook_input = json.load(sys.stdin)
-
-event = {
-    'hook_event_name': 'PostToolUse',
-    'session_id': hook_input.get('session_id'),
-    'tool_name': hook_input.get('tool_name'),
-    'tool_use_id': hook_input.get('tool_use_id'),
-    'tool_input': hook_input.get('tool_input'),
-    'tool_response': hook_input.get('tool_response'),
-    'cwd': hook_input.get('cwd'),
-}
-
-try:
-    subprocess.run(
-        ['%s', 'capture-hook', '--json'],
-        input=json.dumps(event),
-        text=True,
-        check=False,
-        capture_output=True
-    )
-except Exception:
-    pass
-
-sys.exit(0)
-`, provPath)
-}
-
-const claudeSessionHookScript = `#!/usr/bin/env python3
-import json
-import sys
-
-sys.exit(0)
-`
