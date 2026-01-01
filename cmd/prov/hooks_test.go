@@ -453,6 +453,58 @@ func TestInstallHooksUnsupportedAgent(t *testing.T) {
 	}
 }
 
+// TestInstallHooksEmbedProvPath tests that hook scripts contain full path to prov binary
+func TestInstallHooksEmbedProvPath(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("Failed to create .claude dir: %v", err)
+	}
+
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+
+	_, err := runCLI(t, "install-hooks", "claude-code")
+	if err != nil {
+		t.Fatalf("install-hooks failed: %v", err)
+	}
+
+	hooksDir := filepath.Join(tmpDir, "hooks")
+
+	// Check that each hook script contains the full path to prov
+	hookScripts := []string{
+		"claude-prompt.py",
+		"claude-tool-pre.py",
+		"claude-tool-post.py",
+	}
+
+	for _, script := range hookScripts {
+		scriptPath := filepath.Join(hooksDir, script)
+		content, err := os.ReadFile(scriptPath)
+		if err != nil {
+			t.Fatalf("Failed to read hook script %s: %v", script, err)
+		}
+
+		scriptContent := string(content)
+
+		// Verify the script contains an absolute path (starts with /)
+		// In test environment this will be the test binary path
+		if !strings.Contains(scriptContent, "subprocess.run(\n        ['/") &&
+			!strings.Contains(scriptContent, "subprocess.run(\n        [\"/") {
+			t.Errorf("Hook script %s does not contain absolute path to prov binary\nContent: %s",
+				script, scriptContent)
+		}
+
+		// Verify it's NOT using just "prov" without a path
+		if strings.Contains(scriptContent, "['prov',") || strings.Contains(scriptContent, "[\"prov\",") {
+			t.Errorf("Hook script %s still contains hardcoded 'prov' instead of full path\nContent: %s",
+				script, scriptContent)
+		}
+	}
+}
+
 // buildCLICommand creates an exec.Cmd for the CLI tool (helper for stdin tests)
 func buildCLICommand(t *testing.T, args ...string) *exec.Cmd {
 	t.Helper()

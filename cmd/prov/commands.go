@@ -516,15 +516,21 @@ func installHooks(agent string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
+	// Get the full path to the prov executable
+	provPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
 	hooksDir := filepath.Join(getProvenanceHome(), "hooks")
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
 	scripts := map[string]string{
-		"claude-prompt.py":     claudePromptHookScript,
-		"claude-tool-pre.py":   claudeToolPreHookScript,
-		"claude-tool-post.py":  claudeToolPostHookScript,
+		"claude-prompt.py":     generateClaudePromptHookScript(provPath),
+		"claude-tool-pre.py":   generateClaudeToolPreHookScript(provPath),
+		"claude-tool-post.py":  generateClaudeToolPostHookScript(provPath),
 		"claude-session.py":    claudeSessionHookScript,
 	}
 
@@ -796,7 +802,8 @@ func uninstallHooks(agent string) error {
 	return nil
 }
 
-const claudePromptHookScript = `#!/usr/bin/env python3
+func generateClaudePromptHookScript(provPath string) string {
+	return fmt.Sprintf(`#!/usr/bin/env python3
 import json
 import sys
 import subprocess
@@ -814,7 +821,7 @@ event = {
 
 try:
     subprocess.run(
-        ['prov', 'capture-hook', '--json'],
+        ['%s', 'capture-hook', '--json'],
         input=json.dumps(event),
         text=True,
         check=False,
@@ -824,9 +831,11 @@ except Exception:
     pass
 
 sys.exit(0)
-`
+`, provPath)
+}
 
-const claudeToolPreHookScript = `#!/usr/bin/env python3
+func generateClaudeToolPreHookScript(provPath string) string {
+	return fmt.Sprintf(`#!/usr/bin/env python3
 import json
 import sys
 import subprocess
@@ -845,7 +854,7 @@ event = {
 
 try:
     subprocess.run(
-        ['prov', 'capture-hook', '--json'],
+        ['%s', 'capture-hook', '--json'],
         input=json.dumps(event),
         text=True,
         check=False,
@@ -855,9 +864,11 @@ except Exception:
     pass
 
 sys.exit(0)
-`
+`, provPath)
+}
 
-const claudeToolPostHookScript = `#!/usr/bin/env python3
+func generateClaudeToolPostHookScript(provPath string) string {
+	return fmt.Sprintf(`#!/usr/bin/env python3
 import json
 import sys
 import subprocess
@@ -876,7 +887,7 @@ event = {
 
 try:
     subprocess.run(
-        ['prov', 'capture-hook', '--json'],
+        ['%s', 'capture-hook', '--json'],
         input=json.dumps(event),
         text=True,
         check=False,
@@ -886,7 +897,8 @@ except Exception:
     pass
 
 sys.exit(0)
-`
+`, provPath)
+}
 
 const claudeSessionHookScript = `#!/usr/bin/env python3
 import json

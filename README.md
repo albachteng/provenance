@@ -44,7 +44,7 @@ For Claude Code users, install hooks to automatically capture all interactions:
 ./prov install-hooks claude-code
 ```
 
-This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/settings.json`.
+This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/settings.json`. The hooks automatically embed the full path to your `prov` binary, so you **don't need to add `prov` to your PATH**.
 
 **What gets captured:**
 - Every prompt you send to Claude (`UserPromptSubmit`)
