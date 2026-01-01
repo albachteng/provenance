@@ -2,7 +2,6 @@ package session
 
 import (
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
