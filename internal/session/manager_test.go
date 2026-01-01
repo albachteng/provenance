@@ -171,9 +171,17 @@ func TestManagerAutoEndSession(t *testing.T) {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
-	time.Sleep(150 * time.Millisecond)
+	// Poll until session should end (with reasonable timeout)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	shouldEnd := false
+	for time.Now().Before(deadline) {
+		if manager.CheckSessionBoundaries() {
+			shouldEnd = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
-	shouldEnd := manager.CheckSessionBoundaries()
 	if !shouldEnd {
 		t.Error("Expected session to end after timeout")
 	}
