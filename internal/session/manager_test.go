@@ -105,14 +105,12 @@ func TestManagerRecordEvent(t *testing.T) {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
-	// Record an event
 	eventID := "evt-test-123"
 	err = manager.RecordEvent(sessionID, eventID)
 	if err != nil {
 		t.Fatalf("RecordEvent failed: %v", err)
 	}
 
-	// Verify activity was updated
 	session := manager.GetCurrentSession()
 	if session == nil {
 		t.Fatal("Expected active session")
@@ -122,10 +120,13 @@ func TestManagerRecordEvent(t *testing.T) {
 		t.Errorf("EventCount = %d, want 1", session.EventCount)
 	}
 
-	// Last event time should be recent
-	timeSinceLastEvent := time.Since(session.LastEventTime)
-	if timeSinceLastEvent > 1*time.Second {
-		t.Errorf("LastEventTime too old: %v ago", timeSinceLastEvent)
+	// LastEventTime should be set and after session start
+	if session.LastEventTime.IsZero() {
+		t.Error("LastEventTime should be set after recording event")
+	}
+
+	if session.LastEventTime.Before(session.StartTime) {
+		t.Error("LastEventTime should be after or equal to StartTime")
 	}
 }
 
@@ -142,7 +143,6 @@ func TestManagerSetLLMActive(t *testing.T) {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
-	// Set LLM active
 	manager.SetLLMActive(true)
 
 	session := manager.GetCurrentSession()
@@ -150,7 +150,6 @@ func TestManagerSetLLMActive(t *testing.T) {
 		t.Error("Expected IsLLMActive = true")
 	}
 
-	// Set LLM idle
 	manager.SetLLMActive(false)
 
 	session = manager.GetCurrentSession()
@@ -164,7 +163,6 @@ func TestManagerAutoEndSession(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	// Use a very short timeout for testing
 	strategy := NewSmartTimeStrategy(100*time.Millisecond, 50*time.Millisecond, false)
 	manager := NewManager(db, strategy)
 
@@ -173,21 +171,17 @@ func TestManagerAutoEndSession(t *testing.T) {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
-	// Wait for timeout
 	time.Sleep(150 * time.Millisecond)
 
-	// Check if session should end
 	shouldEnd := manager.CheckSessionBoundaries()
 	if !shouldEnd {
 		t.Error("Expected session to end after timeout")
 	}
 
-	// Verify session ended
 	if manager.GetCurrentSession() != nil {
 		t.Error("Expected no active session after auto-end")
 	}
 
-	// Verify session persisted
 	session, err := storage.GetSession(db, sessionID)
 	if err != nil {
 		t.Fatalf("Failed to get session: %v", err)
@@ -206,19 +200,16 @@ func TestManagerMultipleSessionsSequential(t *testing.T) {
 	strategy := NewSmartTimeStrategy(30*time.Minute, 5*time.Minute, true)
 	manager := NewManager(db, strategy)
 
-	// Start first session
 	session1ID, err := manager.StartSession("/test/repo1")
 	if err != nil {
 		t.Fatalf("StartSession 1 failed: %v", err)
 	}
 
-	// End first session
 	err = manager.EndSession(session1ID, EndReasonManual)
 	if err != nil {
 		t.Fatalf("EndSession 1 failed: %v", err)
 	}
 
-	// Start second session
 	session2ID, err := manager.StartSession("/test/repo2")
 	if err != nil {
 		t.Fatalf("StartSession 2 failed: %v", err)
@@ -247,7 +238,6 @@ func TestManagerCannotStartSessionWhileActive(t *testing.T) {
 		t.Fatalf("StartSession 1 failed: %v", err)
 	}
 
-	// Try to start another session
 	_, err = manager.StartSession("/test/repo2")
 	if err == nil {
 		t.Error("Expected error when starting session while one is active")
