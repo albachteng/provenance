@@ -85,16 +85,24 @@ func mergeConfig(dst, src *Config) {
 	if src.Session.SmartTime.ActivityCheckInterval.Duration != 0 {
 		dst.Session.SmartTime.ActivityCheckInterval = src.Session.SmartTime.ActivityCheckInterval
 	}
-	// Note: ExtendIfActive boolean can't be overridden to false via config
-	// due to inability to distinguish explicit false from zero value
+	// Merge pointer boolean (nil = not set, non-nil = explicitly set to true or false)
+	if src.Session.SmartTime.ExtendIfActive != nil {
+		dst.Session.SmartTime.ExtendIfActive = src.Session.SmartTime.ExtendIfActive
+	}
 
 	// Git event settings
 	if src.Session.GitEvent.FallbackTimeout.Duration != 0 {
 		dst.Session.GitEvent.FallbackTimeout = src.Session.GitEvent.FallbackTimeout
 	}
-	// Note: EndOnCommit and EndOnBranchSwitch booleans can't be overridden to false
-	// due to inability to distinguish explicit false from zero value
+	// Merge pointer booleans (nil = not set, non-nil = explicitly set to true or false)
+	if src.Session.GitEvent.EndOnCommit != nil {
+		dst.Session.GitEvent.EndOnCommit = src.Session.GitEvent.EndOnCommit
+	}
+	if src.Session.GitEvent.EndOnBranchSwitch != nil {
+		dst.Session.GitEvent.EndOnBranchSwitch = src.Session.GitEvent.EndOnBranchSwitch
+	}
 
+	// Storage settings
 	if src.Storage.DBPath != "" {
 		dst.Storage.DBPath = src.Storage.DBPath
 	}

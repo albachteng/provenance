@@ -20,14 +20,14 @@ func TestDefault(t *testing.T) {
 	if cfg.Session.SmartTime.ActivityCheckInterval.Duration != 5*time.Minute {
 		t.Errorf("expected activity check 5m, got %v", cfg.Session.SmartTime.ActivityCheckInterval.Duration)
 	}
-	if !cfg.Session.SmartTime.ExtendIfActive {
+	if cfg.Session.SmartTime.ExtendIfActive == nil || !*cfg.Session.SmartTime.ExtendIfActive {
 		t.Error("expected extend_if_active to be true")
 	}
 
-	if !cfg.Session.GitEvent.EndOnCommit {
+	if cfg.Session.GitEvent.EndOnCommit == nil || !*cfg.Session.GitEvent.EndOnCommit {
 		t.Error("expected end_on_commit to be true")
 	}
-	if !cfg.Session.GitEvent.EndOnBranchSwitch {
+	if cfg.Session.GitEvent.EndOnBranchSwitch == nil || !*cfg.Session.GitEvent.EndOnBranchSwitch {
 		t.Error("expected end_on_branch_switch to be true")
 	}
 	if cfg.Session.GitEvent.FallbackTimeout.Duration != 4*time.Hour {

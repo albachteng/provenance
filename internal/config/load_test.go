@@ -50,11 +50,11 @@ daemon:
 	if cfg.Session.GitEvent.FallbackTimeout.Duration != 2*time.Hour {
 		t.Errorf("expected fallback timeout 2h, got %v", cfg.Session.GitEvent.FallbackTimeout.Duration)
 	}
-	// Boolean fields keep default values (can't be overridden to false in YAML)
-	if !cfg.Session.GitEvent.EndOnCommit {
+	// Boolean fields keep default values if not explicitly set
+	if cfg.Session.GitEvent.EndOnCommit == nil || !*cfg.Session.GitEvent.EndOnCommit {
 		t.Error("expected end_on_commit to remain true (default)")
 	}
-	if !cfg.Session.GitEvent.EndOnBranchSwitch {
+	if cfg.Session.GitEvent.EndOnBranchSwitch == nil || !*cfg.Session.GitEvent.EndOnBranchSwitch {
 		t.Error("expected end_on_branch_switch to remain true (default)")
 	}
 	if cfg.Daemon.SessionCheckInterval.Duration != 30*time.Second {
@@ -236,5 +236,41 @@ session:
 	_, err := Load(tmpDir, "")
 	if err == nil {
 		t.Error("expected validation error for negative duration, got nil")
+	}
+}
+
+func TestLoad_ExplicitFalseBooleans(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Test that we can explicitly set booleans to false (pointer booleans)
+	configWithFalse := `
+session:
+  strategy: "git-event"
+  git_event:
+    end_on_commit: false
+    end_on_branch_switch: false
+    fallback_timeout: "2h"
+`
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(configWithFalse), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := Load(tmpDir, "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify booleans were explicitly set to false
+	if cfg.Session.GitEvent.EndOnCommit == nil {
+		t.Error("expected end_on_commit to be set (non-nil)")
+	} else if *cfg.Session.GitEvent.EndOnCommit {
+		t.Error("expected end_on_commit to be false")
+	}
+
+	if cfg.Session.GitEvent.EndOnBranchSwitch == nil {
+		t.Error("expected end_on_branch_switch to be set (non-nil)")
+	} else if *cfg.Session.GitEvent.EndOnBranchSwitch {
+		t.Error("expected end_on_branch_switch to be false")
 	}
 }

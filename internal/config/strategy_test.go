@@ -10,7 +10,8 @@ func TestCreateSessionStrategy_SmartTime(t *testing.T) {
 	cfg.Session.Strategy = "smart-time"
 	cfg.Session.SmartTime.BaseTimeout = Duration{45 * time.Minute}
 	cfg.Session.SmartTime.ActivityCheckInterval = Duration{10 * time.Minute}
-	cfg.Session.SmartTime.ExtendIfActive = true
+	extendIfActive := true
+	cfg.Session.SmartTime.ExtendIfActive = &extendIfActive
 
 	strategy, err := cfg.CreateSessionStrategy()
 	if err != nil {
@@ -29,8 +30,10 @@ func TestCreateSessionStrategy_SmartTime(t *testing.T) {
 func TestCreateSessionStrategy_GitEvent(t *testing.T) {
 	cfg := Default()
 	cfg.Session.Strategy = "git-event"
-	cfg.Session.GitEvent.EndOnCommit = true
-	cfg.Session.GitEvent.EndOnBranchSwitch = true
+	endOnCommit := true
+	endOnBranchSwitch := true
+	cfg.Session.GitEvent.EndOnCommit = &endOnCommit
+	cfg.Session.GitEvent.EndOnBranchSwitch = &endOnBranchSwitch
 	cfg.Session.GitEvent.FallbackTimeout = Duration{2 * time.Hour}
 
 	strategy, err := cfg.CreateSessionStrategy()

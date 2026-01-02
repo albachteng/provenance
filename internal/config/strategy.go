@@ -10,16 +10,32 @@ import (
 func (c *Config) CreateSessionStrategy() (session.SessionStrategy, error) {
 	switch c.Session.Strategy {
 	case "smart-time":
+		// Dereference pointer booleans with defaults
+		extendIfActive := true
+		if c.Session.SmartTime.ExtendIfActive != nil {
+			extendIfActive = *c.Session.SmartTime.ExtendIfActive
+		}
+
 		return session.NewSmartTimeStrategy(
 			c.Session.SmartTime.BaseTimeout.Duration,
 			c.Session.SmartTime.ActivityCheckInterval.Duration,
-			c.Session.SmartTime.ExtendIfActive,
+			extendIfActive,
 		), nil
 
 	case "git-event":
+		// Dereference pointer booleans with defaults
+		endOnCommit := true
+		if c.Session.GitEvent.EndOnCommit != nil {
+			endOnCommit = *c.Session.GitEvent.EndOnCommit
+		}
+		endOnBranchSwitch := true
+		if c.Session.GitEvent.EndOnBranchSwitch != nil {
+			endOnBranchSwitch = *c.Session.GitEvent.EndOnBranchSwitch
+		}
+
 		return session.NewGitEventStrategy(
-			c.Session.GitEvent.EndOnCommit,
-			c.Session.GitEvent.EndOnBranchSwitch,
+			endOnCommit,
+			endOnBranchSwitch,
 			c.Session.GitEvent.FallbackTimeout.Duration,
 		), nil
 

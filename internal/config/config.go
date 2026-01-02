@@ -28,13 +28,21 @@ type SessionConfig struct {
 type SmartTimeConfig struct {
 	BaseTimeout           Duration `yaml:"base_timeout"`
 	ActivityCheckInterval Duration `yaml:"activity_check_interval"`
-	ExtendIfActive        bool     `yaml:"extend_if_active"`
+	// ExtendIfActive uses *bool to distinguish between explicit false and unset.
+	// Without the pointer, YAML unmarshaling can't tell the difference between
+	// "extend_if_active: false" (explicit) and omitting the field (unset).
+	// This allows config file layering to work correctly.
+	ExtendIfActive *bool `yaml:"extend_if_active,omitempty"`
 }
 
 // GitEventConfig configures the git-event session strategy
 type GitEventConfig struct {
-	EndOnCommit       bool     `yaml:"end_on_commit"`
-	EndOnBranchSwitch bool     `yaml:"end_on_branch_switch"`
+	// EndOnCommit and EndOnBranchSwitch use *bool to distinguish between explicit false and unset.
+	// Without pointers, YAML unmarshaling can't tell the difference between
+	// "end_on_commit: false" (explicit) and omitting the field (unset).
+	// This allows config file layering to work correctly.
+	EndOnCommit       *bool    `yaml:"end_on_commit,omitempty"`
+	EndOnBranchSwitch *bool    `yaml:"end_on_branch_switch,omitempty"`
 	FallbackTimeout   Duration `yaml:"fallback_timeout"`
 }
 
@@ -90,6 +98,12 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 	return d.Duration.String(), nil
 }
 
+// boolPtr returns a pointer to a bool value
+// Helper for creating default config with pointer booleans
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 // Default returns a Config with sensible defaults
 // These match current test values for backward compatibility
 func Default() *Config {
@@ -99,11 +113,11 @@ func Default() *Config {
 			SmartTime: SmartTimeConfig{
 				BaseTimeout:           Duration{30 * time.Minute},
 				ActivityCheckInterval: Duration{5 * time.Minute},
-				ExtendIfActive:        true,
+				ExtendIfActive:        boolPtr(true),
 			},
 			GitEvent: GitEventConfig{
-				EndOnCommit:       true,
-				EndOnBranchSwitch: true,
+				EndOnCommit:       boolPtr(true),
+				EndOnBranchSwitch: boolPtr(true),
 				FallbackTimeout:   Duration{4 * time.Hour},
 			},
 		},
