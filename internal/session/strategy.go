@@ -27,11 +27,11 @@ type Context struct {
 	CurrentRepoPath string
 
 	// Git context
-	GitBranch      string
-	GitCommit      string
-	GitDirty       bool
-	LastGitBranch  string // Branch at session start
-	LastGitCommit  string // Commit at last check
+	GitBranch     string
+	GitCommit     string
+	GitDirty      bool
+	LastGitBranch string // Branch at session start
+	LastGitCommit string // Commit at last check
 
 	// Activity tracking
 	TimeSinceLastEvent time.Duration
@@ -42,9 +42,9 @@ type Context struct {
 type EndReason string
 
 const (
-	EndReasonTimeout       EndReason = "timeout"
-	EndReasonInactivity    EndReason = "inactivity"
-	EndReasonCommit        EndReason = "git_commit"
-	EndReasonBranchSwitch  EndReason = "git_branch_switch"
-	EndReasonManual        EndReason = "manual"
+	EndReasonTimeout      EndReason = "timeout"
+	EndReasonInactivity   EndReason = "inactivity"
+	EndReasonCommit       EndReason = "git_commit"
+	EndReasonBranchSwitch EndReason = "git_branch_switch"
+	EndReasonManual       EndReason = "manual"
 )

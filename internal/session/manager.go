@@ -132,7 +132,9 @@ func (m *Manager) CheckSessionBoundaries() bool {
 	// Check if strategy says to end
 	if m.strategy.ShouldEndSession(ctx) {
 		// End the session
-		m.EndSession(m.currentSession.ID, EndReasonTimeout)
+		if err := m.EndSession(m.currentSession.ID, EndReasonTimeout); err != nil {
+			return false
+		}
 		return true
 	}
 
