@@ -14,9 +14,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/albachteng/provenance/internal/config"
 	"github.com/albachteng/provenance/internal/daemon"
 	"github.com/albachteng/provenance/internal/git"
+	"github.com/albachteng/provenance/internal/session"
 	"github.com/albachteng/provenance/internal/storage"
+	"gopkg.in/yaml.v3"
 )
 
 // Embedded hook script templates
@@ -143,32 +146,62 @@ func isDaemonRunning(socketPath string) bool {
 	return true
 }
 
+// findGitRoot finds the root of the current git repository
+// Returns empty string and error if not in a git repository
+func findGitRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // daemonRun runs the daemon process (hidden subcommand used by daemon start)
 func daemonRun() {
-	dbPath := getDBPath()
-	socketPath := getSocketPath()
-	pidFile := filepath.Join(getProvenanceHome(), "daemon.pid")
+	provenanceHome := getProvenanceHome()
 
-	if err := os.MkdirAll(getProvenanceHome(), 0755); err != nil {
+	if err := os.MkdirAll(provenanceHome, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create provenance home: %v\n", err)
 		os.Exit(1)
 	}
 
-	db, err := storage.InitDatabase(dbPath)
+	// Load configuration
+	repoPath, _ := findGitRoot() // May be empty if not in a repo
+	cfg, err := config.Load(provenanceHome, repoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize database
+	db, err := storage.InitDatabase(cfg.Storage.DBPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize database: %v\n", err)
 		os.Exit(1)
 	}
 	defer db.Close() //nolint:errcheck
 
+	// Write PID file
 	pid := os.Getpid()
-	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
+	if err := os.WriteFile(cfg.Daemon.PIDFile, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write PID file: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.Remove(pidFile) //nolint:errcheck
+	defer os.Remove(cfg.Daemon.PIDFile) //nolint:errcheck
 
-	daemon, err := daemon.NewDaemon(db, socketPath)
+	// Create session strategy from config
+	strategy, err := cfg.CreateSessionStrategy()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create session manager
+	sessionMgr := session.NewManager(db, strategy)
+
+	// Create daemon with session manager and config
+	daemon, err := daemon.NewDaemon(db, cfg.Daemon.SocketPath, sessionMgr, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create daemon: %v\n", err)
 		os.Exit(1)
@@ -821,4 +854,87 @@ func uninstallHooks(agent string) error {
 	fmt.Println("Claude Code hooks uninstalled")
 
 	return nil
+}
+
+// Config command implementations
+
+func configShow() {
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal config: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("# Current configuration (merged from all sources)")
+	fmt.Println(string(data))
+}
+
+func configInit(global bool) {
+	var configPath string
+
+	if global {
+		provenanceHome := getProvenanceHome()
+		configPath = filepath.Join(provenanceHome, "config.yaml")
+	} else {
+		repoPath, err := findGitRoot()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Not in a git repository. Use --global for global config.")
+			os.Exit(1)
+		}
+
+		configDir := filepath.Join(repoPath, ".ai-provenance")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create config directory: %v\n", err)
+			os.Exit(1)
+		}
+		configPath = filepath.Join(configDir, "config.yaml")
+	}
+
+	if _, err := os.Stat(configPath); err == nil {
+		fmt.Fprintf(os.Stderr, "Config file already exists: %s\n", configPath)
+		fmt.Fprintln(os.Stderr, "Remove it first if you want to reinitialize.")
+		os.Exit(1)
+	}
+
+	cfg := config.Default()
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal default config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write config file: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Created config file: %s\n", configPath)
+}
+
+func configValidate() {
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Configuration is invalid: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Configuration is valid")
+	fmt.Printf("Active strategy: %s\n", cfg.Session.Strategy)
+	fmt.Printf("Database path: %s\n", cfg.Storage.DBPath)
+	fmt.Printf("Socket path: %s\n", cfg.Daemon.SocketPath)
+
+	strategy, err := cfg.CreateSessionStrategy()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Session strategy: %s\n", strategy.Name())
 }

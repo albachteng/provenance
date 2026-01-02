@@ -11,16 +11,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/albachteng/provenance/internal/config"
+	"github.com/albachteng/provenance/internal/session"
 	"github.com/albachteng/provenance/internal/storage"
 )
 
 func TestDaemonStartAndBind(t *testing.T) {
-	tmpDir, db := setupTestDaemon(t)
+	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
 	defer db.Close()
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath)
+	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -57,12 +59,12 @@ func TestDaemonStartAndBind(t *testing.T) {
 }
 
 func TestDaemonAcceptEvent(t *testing.T) {
-	tmpDir, db := setupTestDaemon(t)
+	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
 	defer db.Close()
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath)
+	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -111,12 +113,12 @@ func TestDaemonAcceptEvent(t *testing.T) {
 }
 
 func TestDaemonInvalidJSON(t *testing.T) {
-	tmpDir, db := setupTestDaemon(t)
+	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
 	defer db.Close()
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath)
+	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -148,12 +150,12 @@ func TestDaemonInvalidJSON(t *testing.T) {
 }
 
 func TestDaemonGracefulShutdown(t *testing.T) {
-	tmpDir, db := setupTestDaemon(t)
+	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
 	defer db.Close()
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath)
+	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -184,12 +186,12 @@ func TestDaemonGracefulShutdown(t *testing.T) {
 }
 
 func TestDaemonConcurrentEvents(t *testing.T) {
-	tmpDir, db := setupTestDaemon(t)
+	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
 	defer db.Close()
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath)
+	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -250,12 +252,12 @@ func TestDaemonConcurrentEvents(t *testing.T) {
 }
 
 func TestDaemonSessionEvent(t *testing.T) {
-	tmpDir, db := setupTestDaemon(t)
+	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
 	defer db.Close()
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath)
+	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -293,12 +295,12 @@ func TestDaemonSessionEvent(t *testing.T) {
 }
 
 func TestDaemonMultipleConnections(t *testing.T) {
-	tmpDir, db := setupTestDaemon(t)
+	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
 	defer db.Close()
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath)
+	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestDaemonMultipleConnections(t *testing.T) {
 
 // Helper functions
 
-func setupTestDaemon(t *testing.T) (string, *sql.DB) {
+func setupTestDaemon(t *testing.T) (string, *sql.DB, *session.Manager, *config.Config) {
 	t.Helper()
 
 	tmpDir, err := os.MkdirTemp("", "daemon-test-*")
@@ -350,7 +352,19 @@ func setupTestDaemon(t *testing.T) (string, *sql.DB) {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	return tmpDir, db
+	// Create test config
+	cfg := config.Default()
+	cfg.Daemon.SocketPath = filepath.Join(tmpDir, "test.sock")
+	cfg.Storage.DBPath = dbPath
+
+	// Create session manager with smart-time strategy
+	strategy, err := cfg.CreateSessionStrategy()
+	if err != nil {
+		t.Fatalf("Failed to create session strategy: %v", err)
+	}
+	sessionMgr := session.NewManager(db, strategy)
+
+	return tmpDir, db, sessionMgr, cfg
 }
 
 // waitForEvent polls the database until the event exists or timeout expires

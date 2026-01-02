@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/albachteng/provenance/internal/config"
 )
 
 // Version information (set by build flags)
@@ -28,6 +30,8 @@ func main() {
 		cmdVersion()
 	case "daemon":
 		cmdDaemon()
+	case "config":
+		cmdConfig()
 	case "hook":
 		cmdHook()
 	case "wrap":
@@ -63,6 +67,10 @@ func printUsage() {
 	fmt.Println("  daemon start         Start background daemon")
 	fmt.Println("  daemon stop          Stop background daemon")
 	fmt.Println("  daemon status        Check daemon status")
+	fmt.Println("  config show          Show current configuration")
+	fmt.Println("  config init          Create repo config file")
+	fmt.Println("  config init --global Create global config file")
+	fmt.Println("  config validate      Validate configuration")
 	fmt.Println("  list                 List recent prompts")
 	fmt.Println("  show <id>            Show prompt details")
 	fmt.Println("  search <query>       Search prompts")
@@ -97,6 +105,36 @@ func cmdDaemon() {
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown daemon command: %s\n", subcommand)
 		fmt.Fprintln(os.Stderr, "Usage: prov daemon <start|stop|status>")
+		os.Exit(1)
+	}
+}
+
+func cmdConfig() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov config <show|init|validate>")
+		os.Exit(1)
+	}
+
+	subcommand := os.Args[2]
+
+	switch subcommand {
+	case "show":
+		configShow()
+	case "init":
+		// Check for --global flag
+		globalFlag := false
+		for _, arg := range os.Args[3:] {
+			if arg == "--global" {
+				globalFlag = true
+				break
+			}
+		}
+		configInit(globalFlag)
+	case "validate":
+		configValidate()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown config command: %s\n", subcommand)
+		fmt.Fprintln(os.Stderr, "Usage: prov config <show|init|validate>")
 		os.Exit(1)
 	}
 }
@@ -244,12 +282,27 @@ func getProvenanceHome() string {
 	return filepath.Join(homeDir, ".ai-provenance")
 }
 
+// getConfig loads the configuration from all sources
+func getConfig() (*config.Config, error) {
+	provenanceHome := getProvenanceHome()
+	repoPath, _ := findGitRoot()
+	return config.Load(provenanceHome, repoPath)
+}
+
 // getSocketPath returns the path to the daemon socket
 func getSocketPath() string {
-	return filepath.Join(getProvenanceHome(), "daemon.sock")
+	cfg, err := getConfig()
+	if err != nil {
+		return filepath.Join(getProvenanceHome(), "daemon.sock")
+	}
+	return cfg.Daemon.SocketPath
 }
 
 // getDBPath returns the path to the database
 func getDBPath() string {
-	return filepath.Join(getProvenanceHome(), "db.sqlite")
+	cfg, err := getConfig()
+	if err != nil {
+		return filepath.Join(getProvenanceHome(), "db.sqlite")
+	}
+	return cfg.Storage.DBPath
 }
