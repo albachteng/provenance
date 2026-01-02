@@ -37,7 +37,6 @@ func (s *SmartTimeStrategy) ShouldEndSession(ctx *Context) bool {
 		return false
 	}
 
-	// Don't end if extendIfActive enabled and LLM currently working
 	if s.extendIfActive && ctx.IsLLMActive {
 		return false
 	}

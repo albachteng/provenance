@@ -25,15 +25,12 @@ func NewManager(db *sql.DB, strategy SessionStrategy) *Manager {
 
 // StartSession creates and starts a new session
 func (m *Manager) StartSession(repoPath string) (string, error) {
-	// Check if a session is already active
 	if m.currentSession != nil && m.currentSession.IsActive() {
 		return "", fmt.Errorf("session already active: %s", m.currentSession.ID)
 	}
 
-	// Generate session ID
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
 
-	// Create session
 	now := time.Now()
 	session := &Session{
 		ID:            sessionID,
@@ -44,7 +41,6 @@ func (m *Manager) StartSession(repoPath string) (string, error) {
 		IsLLMActive:   false,
 	}
 
-	// Persist to database
 	dbSession := storage.Session{
 		ID:        sessionID,
 		StartTime: now,
@@ -65,16 +61,13 @@ func (m *Manager) EndSession(sessionID string, reason EndReason) error {
 		return fmt.Errorf("session %s is not active", sessionID)
 	}
 
-	// Set end time
 	endTime := time.Now()
 	m.currentSession.EndTime = endTime
 
-	// Update in database
 	if err := storage.EndSession(m.db, sessionID, endTime, string(reason)); err != nil {
 		return fmt.Errorf("failed to end session: %w", err)
 	}
 
-	// Clear current session
 	m.currentSession = nil
 	return nil
 }
@@ -93,7 +86,6 @@ func (m *Manager) RecordEvent(sessionID string, eventID string) error {
 		return fmt.Errorf("session %s is not active", sessionID)
 	}
 
-	// Update activity tracking
 	m.currentSession.EventCount++
 	m.currentSession.LastEventTime = time.Now()
 
@@ -113,7 +105,6 @@ func (m *Manager) CheckSessionBoundaries() bool {
 		return false
 	}
 
-	// Build context
 	ctx := &Context{
 		SessionID:          m.currentSession.ID,
 		SessionStart:       m.currentSession.StartTime,
@@ -129,9 +120,7 @@ func (m *Manager) CheckSessionBoundaries() bool {
 		TimeSinceStart:     time.Since(m.currentSession.StartTime),
 	}
 
-	// Check if strategy says to end
 	if m.strategy.ShouldEndSession(ctx) {
-		// End the session
 		if err := m.EndSession(m.currentSession.ID, EndReasonTimeout); err != nil {
 			return false
 		}
