@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: Phase 2A complete - Claude Code hooks installed! Automatically capture all your Claude interactions. See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 2A complete - Claude Code hooks actively capturing! All prompts and tool invocations automatically logged. Next: Phase 0 completion (session management & configuration). See `ROADMAP.md` for development plans.
 
 ## Quick Start
 
@@ -238,6 +238,76 @@ provenance/
 - **`TESTING.md`**: Manual testing guide with step-by-step examples
 - **`ROADMAP.md`**: Development roadmap, phase breakdown, and design decisions
 - **`DESIGN.md`**: Technical design document and architecture details
+
+## Troubleshooting
+
+### Hooks not capturing events
+
+**Problem**: `./prov list` shows no events after installing hooks.
+
+**Diagnosis**:
+```bash
+# 1. Check if daemon is running
+./prov daemon status
+
+# 2. Verify hooks are installed
+./prov hooks status
+
+# 3. Check Claude settings
+cat ~/.claude/settings.json | grep -A 10 hooks
+
+# 4. Test hook manually
+echo '{"hook_event_name":"UserPromptSubmit","session_id":"test","prompt":"test prompt","cwd":"'$(pwd)'"}' | ~/.ai-provenance/hooks/claude-prompt.py
+./prov list
+```
+
+**Common fixes**:
+- Restart Claude Code after installing hooks
+- Reinstall hooks: `./prov hooks uninstall claude-code && ./prov install-hooks claude-code`
+- Check hook script permissions: `ls -l ~/.ai-provenance/hooks/`
+
+### Database locked errors
+
+**Problem**: "database is locked" error when running CLI commands.
+
+**Cause**: SQLite WAL mode can have locks if daemon crashed.
+
+**Fix**:
+```bash
+# Stop daemon cleanly
+./prov daemon stop
+
+# Force clean if needed
+rm -f ~/.ai-provenance/daemon.sock
+rm -f ~/.ai-provenance/daemon.pid
+
+# Restart
+./prov daemon start
+```
+
+### Events missing after moving prov binary
+
+**Problem**: Hooks stopped working after moving `prov` binary to a new location.
+
+**Cause**: Hook scripts contain the full path to the `prov` binary embedded at install time.
+
+**Fix**: Reinstall hooks to update the embedded path:
+```bash
+./prov install-hooks claude-code
+```
+
+### No events for user prompts
+
+**Problem**: Tool invocations are captured, but user prompts are missing.
+
+**Cause**: User prompts require the Claude Code interactive shell to trigger `UserPromptSubmit` hooks.
+
+**Verify**: Check that you're seeing `UserPromptSubmit` events:
+```bash
+./prov search "UserPromptSubmit"
+```
+
+If missing, ensure hooks are properly registered in `~/.claude/settings.json`.
 
 ## Contributing
 
