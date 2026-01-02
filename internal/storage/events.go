@@ -314,6 +314,40 @@ func EndSession(db *sql.DB, sessionID string, endTime time.Time, reason string) 
 	return nil
 }
 
+// GetSession retrieves a session by ID
+func GetSession(db *sql.DB, sessionID string) (*Session, error) {
+	query := `
+		SELECT
+			id, start_time, end_time, repo_path,
+			total_prompts, total_tokens, ended_by
+		FROM sessions
+		WHERE id = ?
+	`
+
+	var session Session
+	var startTimeUnix int64
+	var endTimeUnix *int64
+
+	err := db.QueryRow(query, sessionID).Scan(
+		&session.ID, &startTimeUnix, &endTimeUnix, &session.RepoPath,
+		&session.TotalPrompts, &session.TotalTokens, &session.EndedBy,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to query session: %w", err)
+	}
+
+	session.StartTime = time.Unix(startTimeUnix, 0)
+	if endTimeUnix != nil {
+		endTime := time.Unix(*endTimeUnix, 0)
+		session.EndTime = &endTime
+	}
+
+	return &session, nil
+}
+
 // UpdateSessionMetrics increments the session's total prompts and tokens
 func UpdateSessionMetrics(db *sql.DB, sessionID string, promptsDelta, tokensDelta int) error {
 	query := `
