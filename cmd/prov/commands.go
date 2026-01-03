@@ -166,15 +166,13 @@ func daemonRun() {
 		os.Exit(1)
 	}
 
-	// Load configuration
-	repoPath, _ := findGitRoot() // May be empty if not in a repo
+	repoPath, _ := findGitRoot() // TODO: may be empty if not in a repo
 	cfg, err := config.Load(provenanceHome, repoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Initialize database
 	db, err := storage.InitDatabase(cfg.Storage.DBPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize database: %v\n", err)
@@ -182,7 +180,6 @@ func daemonRun() {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Write PID file
 	pid := os.Getpid()
 	if err := os.WriteFile(cfg.Daemon.PIDFile, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write PID file: %v\n", err)
@@ -190,17 +187,14 @@ func daemonRun() {
 	}
 	defer os.Remove(cfg.Daemon.PIDFile) //nolint:errcheck
 
-	// Create session strategy from config
 	strategy, err := cfg.CreateSessionStrategy()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Create session manager
 	sessionMgr := session.NewManager(db, strategy)
 
-	// Create daemon with session manager and config
 	daemon, err := daemon.NewDaemon(db, cfg.Daemon.SocketPath, sessionMgr, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create daemon: %v\n", err)
@@ -221,7 +215,7 @@ func listEvents(limit int) error {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Get all events (we'll implement proper querying later)
+	// TODO: implement proper querying (by session, agent, user, project, etc)
 	// For now, get events from all sessions
 	rows, err := db.Query(`
 		SELECT id, timestamp, session_id, agent, prompt_text, author
@@ -554,6 +548,7 @@ func generateEventID() string {
 	return fmt.Sprintf("evt-%d-%d", time.Now().Unix(), time.Now().UnixNano()%1000000)
 }
 
+// installs hooks in supported agents' configurations (currently only supports claude-code)
 func installHooks(agent string) error {
 	if agent != "claude-code" {
 		return fmt.Errorf("agent '%s' not supported (supported: claude-code)", agent)
@@ -564,7 +559,6 @@ func installHooks(agent string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	// Get the full path to the prov executable
 	provPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -575,7 +569,6 @@ func installHooks(agent string) error {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
-	// Replace {{PROV_PATH}} placeholder with actual path
 	scripts := map[string]string{
 		"claude-prompt.py":    strings.ReplaceAll(claudePromptTemplate, "{{PROV_PATH}}", provPath),
 		"claude-tool-pre.py":  strings.ReplaceAll(claudeToolPreTemplate, "{{PROV_PATH}}", provPath),
@@ -855,8 +848,6 @@ func uninstallHooks(agent string) error {
 
 	return nil
 }
-
-// Config command implementations
 
 func configShow() {
 	cfg, err := getConfig()

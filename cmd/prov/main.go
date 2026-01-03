@@ -121,7 +121,6 @@ func cmdConfig() {
 	case "show":
 		configShow()
 	case "init":
-		// Check for --global flag
 		globalFlag := false
 		for _, arg := range os.Args[3:] {
 			if arg == "--global" {

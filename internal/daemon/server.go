@@ -88,7 +88,6 @@ func (d *Daemon) Start() error {
 
 	close(d.ready)
 
-	// Start session boundary checking
 	d.ticker = time.NewTicker(d.cfg.Daemon.SessionCheckInterval.Duration)
 	d.wg.Add(1)
 	go d.sessionCheckLoop()

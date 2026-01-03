@@ -352,12 +352,10 @@ func setupTestDaemon(t *testing.T) (string, *sql.DB, *session.Manager, *config.C
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Create test config
 	cfg := config.Default()
 	cfg.Daemon.SocketPath = filepath.Join(tmpDir, "test.sock")
 	cfg.Storage.DBPath = dbPath
 
-	// Create session manager with smart-time strategy
 	strategy, err := cfg.CreateSessionStrategy()
 	if err != nil {
 		t.Fatalf("Failed to create session strategy: %v", err)

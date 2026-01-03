@@ -171,8 +171,8 @@ CREATE TABLE sessions (
   - [x] Ready() channel for startup synchronization
   - [x] Concurrent connection handling
   - [x] PromptEvent and SessionEvent routing
+  - [x] Session management (auto-start, timeout-based end)
   - [ ] HTTP fallback for Windows compatibility (deferred)
-  - [ ] Session management (auto-start, timeout-based end)
 
 - [x] **CLI basics** (COMPLETE):
   ```bash
@@ -201,22 +201,42 @@ CREATE TABLE sessions (
   - [x] Swappable provider pattern for future migration
   - [ ] Session → commit correlation logic (deferred to session implementation)
 
-- [ ] **Configuration system** (sensible defaults, highly configurable):
-  - Global config: `~/.ai-provenance/config.yaml`
-  - Per-repo config: `.ai-provenance/config.yaml`
-  - Environment variable overrides (`AI_PROVENANCE_*`)
-  - Configuration schema:
-    - Session timeout (default: 30 minutes)
-    - Storage location (default: global-index + per-repo)
-    - Write batching (start: immediate, plan: configurable)
-    - Redaction rules (builtin patterns + custom)
+- [x] **Configuration system** (COMPLETE):
+  - [x] Global config: `~/.ai-provenance/config.yaml`
+  - [x] Per-repo config: `.ai-provenance/config.yaml`
+  - [x] Environment variable overrides (`AI_PROVENANCE_*`)
+  - [x] Configuration schema with Duration wrapper for YAML
+  - [x] Session strategies: `smart-time` (activity-based) and `git-event` (commit/branch-based)
+  - [x] Session timeouts (base, activity check, fallback) - all configurable
+  - [x] Storage paths (database, socket, PID file, hooks directory)
+  - [x] Daemon settings (startup timeout, shutdown timeout, session check interval)
+  - [x] Redaction configuration (builtin patterns + custom)
+  - [x] CLI commands: `prov config show`, `prov config init`, `prov config validate`
+  - [x] Hierarchical config loading with proper merging
+  - [x] Pointer booleans to distinguish explicit false from unset
+  - [x] Path resolution (relative → absolute based on provenance home)
+  - [x] Comprehensive validation (19 test functions, 34 subtests passing)
+  - [ ] Write batching (deferred - immediate writes for now)
 
-- [ ] **Test harness** (TDD):
-  - Unit tests for all core packages
-  - Mock events via Unix socket
-  - Integration tests: daemon + CLI
-  - Git state capture tests with fixture repos
-  - Session lifecycle tests
+- [x] **Session management** (COMPLETE):
+  - [x] Session manager with pluggable strategy pattern
+  - [x] SmartTimeStrategy: Activity-based with configurable timeout and extension
+  - [x] GitEventStrategy: Commit/branch-based with fallback timeout
+  - [x] Auto-start sessions on first prompt
+  - [x] Background session boundary checking (configurable interval)
+  - [x] Session lifecycle: StartSession, RecordEvent, EndSession
+  - [x] LLM activity tracking for smart timeout extension
+  - [x] Integration with daemon (ticker-based boundary checks)
+  - [x] Comprehensive tests (13 test functions, 24 subtests passing)
+
+- [x] **Test harness** (TDD):
+  - [x] Unit tests for all core packages
+  - [x] Mock events via Unix socket
+  - [x] Integration tests: daemon + CLI
+  - [x] Git state capture tests with fixture repos
+  - [x] Session lifecycle tests
+  - [x] Configuration loading and validation tests
+  - [x] Strategy pattern tests
 
 ### Success Criteria
 - [x] Database schema created with all required tables
@@ -234,9 +254,12 @@ CREATE TABLE sessions (
 - [x] Can query events back via CLI (9/9 CLI tests passing)
 - [x] CLI daemon control works (start/stop/status with PID management)
 - [x] CLI query operations work (list/show/search with correct output)
+- [x] Sessions auto-start and timeout correctly (session manager integrated)
+- [x] Configuration override hierarchy works (env → repo → global → defaults)
+- [x] Config CLI commands work (show, init, validate)
+- [x] Session strategies work (smart-time and git-event implemented and tested)
+- [x] Background session checking integrated with daemon
 - [ ] Daemon survives crashes (WAL recovery - needs testing)
-- [ ] Sessions auto-start and timeout correctly (deferred to session management)
-- [ ] Configuration override hierarchy works (deferred to config system)
 - [ ] All tests pass on Linux and macOS (currently Linux/WSL2 only)
 
 ### Refactoring Notes (Deferred)
@@ -1007,4 +1030,4 @@ provenance/
 
 ---
 
-*Last updated: 2025-12-30 - Phase 1 shell hooks complete, Phase 2A Claude Code integration researched and planned*
+*Last updated: 2026-01-03 - Phase 0 complete (session management & configuration system), Phase 2A complete (Claude Code hooks)*
