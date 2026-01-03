@@ -14,9 +14,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/albachteng/provenance/internal/config"
 	"github.com/albachteng/provenance/internal/daemon"
 	"github.com/albachteng/provenance/internal/git"
+	"github.com/albachteng/provenance/internal/session"
 	"github.com/albachteng/provenance/internal/storage"
+	"gopkg.in/yaml.v3"
 )
 
 // Embedded hook script templates
@@ -143,18 +146,35 @@ func isDaemonRunning(socketPath string) bool {
 	return true
 }
 
+// findGitRoot finds the root of the current git repository
+// Returns empty string and error if not in a git repository
+func findGitRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // daemonRun runs the daemon process (hidden subcommand used by daemon start)
 func daemonRun() {
-	dbPath := getDBPath()
-	socketPath := getSocketPath()
-	pidFile := filepath.Join(getProvenanceHome(), "daemon.pid")
+	provenanceHome := getProvenanceHome()
 
-	if err := os.MkdirAll(getProvenanceHome(), 0755); err != nil {
+	if err := os.MkdirAll(provenanceHome, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create provenance home: %v\n", err)
 		os.Exit(1)
 	}
 
-	db, err := storage.InitDatabase(dbPath)
+	// Try to find git root, but it's OK if we're not in a repo (will use global config only)
+	repoPath, _ := findGitRoot() //nolint:errcheck
+	cfg, err := config.Load(provenanceHome, repoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	db, err := storage.InitDatabase(cfg.Storage.DBPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize database: %v\n", err)
 		os.Exit(1)
@@ -162,13 +182,21 @@ func daemonRun() {
 	defer db.Close() //nolint:errcheck
 
 	pid := os.Getpid()
-	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
+	if err := os.WriteFile(cfg.Daemon.PIDFile, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write PID file: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.Remove(pidFile) //nolint:errcheck
+	defer os.Remove(cfg.Daemon.PIDFile) //nolint:errcheck
 
-	daemon, err := daemon.NewDaemon(db, socketPath)
+	strategy, err := cfg.CreateSessionStrategy()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
+		os.Exit(1)
+	}
+
+	sessionMgr := session.NewManager(db, strategy)
+
+	daemon, err := daemon.NewDaemon(db, cfg.Daemon.SocketPath, sessionMgr, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create daemon: %v\n", err)
 		os.Exit(1)
@@ -188,7 +216,7 @@ func listEvents(limit int) error {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Get all events (we'll implement proper querying later)
+	// TODO: implement proper querying (by session, agent, user, project, etc)
 	// For now, get events from all sessions
 	rows, err := db.Query(`
 		SELECT id, timestamp, session_id, agent, prompt_text, author
@@ -521,6 +549,7 @@ func generateEventID() string {
 	return fmt.Sprintf("evt-%d-%d", time.Now().Unix(), time.Now().UnixNano()%1000000)
 }
 
+// installs hooks in supported agents' configurations (currently only supports claude-code)
 func installHooks(agent string) error {
 	if agent != "claude-code" {
 		return fmt.Errorf("agent '%s' not supported (supported: claude-code)", agent)
@@ -531,7 +560,6 @@ func installHooks(agent string) error {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	// Get the full path to the prov executable
 	provPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -542,7 +570,6 @@ func installHooks(agent string) error {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
-	// Replace {{PROV_PATH}} placeholder with actual path
 	scripts := map[string]string{
 		"claude-prompt.py":    strings.ReplaceAll(claudePromptTemplate, "{{PROV_PATH}}", provPath),
 		"claude-tool-pre.py":  strings.ReplaceAll(claudeToolPreTemplate, "{{PROV_PATH}}", provPath),
@@ -821,4 +848,85 @@ func uninstallHooks(agent string) error {
 	fmt.Println("Claude Code hooks uninstalled")
 
 	return nil
+}
+
+func configShow() {
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal config: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("# Current configuration (merged from all sources)")
+	fmt.Println(string(data))
+}
+
+func configInit(global bool) {
+	var configPath string
+
+	if global {
+		provenanceHome := getProvenanceHome()
+		configPath = filepath.Join(provenanceHome, "config.yaml")
+	} else {
+		repoPath, err := findGitRoot()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Not in a git repository. Use --global for global config.")
+			os.Exit(1)
+		}
+
+		configDir := filepath.Join(repoPath, ".ai-provenance")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create config directory: %v\n", err)
+			os.Exit(1)
+		}
+		configPath = filepath.Join(configDir, "config.yaml")
+	}
+
+	if _, err := os.Stat(configPath); err == nil {
+		fmt.Fprintf(os.Stderr, "Config file already exists: %s\n", configPath)
+		fmt.Fprintln(os.Stderr, "Remove it first if you want to reinitialize.")
+		os.Exit(1)
+	}
+
+	cfg := config.Default()
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to marshal default config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write config file: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Created config file: %s\n", configPath)
+}
+
+func configValidate() {
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Configuration is invalid: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Configuration is valid")
+	fmt.Printf("Active strategy: %s\n", cfg.Session.Strategy)
+	fmt.Printf("Database path: %s\n", cfg.Storage.DBPath)
+	fmt.Printf("Socket path: %s\n", cfg.Daemon.SocketPath)
+
+	strategy, err := cfg.CreateSessionStrategy()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Session strategy: %s\n", strategy.Name())
 }

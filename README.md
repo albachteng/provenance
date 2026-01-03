@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: ✅ Phase 2A complete - Claude Code hooks actively capturing! All prompts and tool invocations automatically logged. Next: Phase 0 completion (session management & configuration). See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 0 complete - Core foundation with session management and configuration! ✅ Phase 2A complete - Claude Code hooks actively capturing! All prompts and tool invocations automatically logged with intelligent session boundaries. See `ROADMAP.md` for development plans.
 
 ## Quick Start
 
@@ -127,12 +127,64 @@ Once the daemon is running and capturing events, you can query them:
 ./prov search "authentication"
 ```
 
-### Environment Configuration
+### Configuration
 
-Override the default storage location:
+AI Provenance supports a hierarchical configuration system with sensible defaults.
 
+**Configuration Hierarchy** (highest to lowest priority):
+1. Environment variables (`AI_PROVENANCE_*`)
+2. Per-repository config (`.ai-provenance/config.yaml`)
+3. Global config (`~/.ai-provenance/config.yaml`)
+4. Built-in defaults
+
+**View current configuration:**
+```bash
+./prov config show
+```
+
+**Create a config file:**
+```bash
+# Create global config
+./prov config init --global
+
+# Create per-repo config (in current git repository)
+./prov config init
+```
+
+**Validate configuration:**
+```bash
+./prov config validate
+```
+
+**Configuration options include:**
+- **Session strategy**: `smart-time` (activity-based) or `git-event` (commit/branch-based)
+- **Session timeouts**: Base timeout, activity check interval, fallback timeout
+- **Storage paths**: Database, socket, PID file locations
+- **Daemon settings**: Startup timeout, shutdown timeout, session check interval
+- **Redaction rules**: Built-in patterns and custom redaction
+
+**Example configuration** (`~/.ai-provenance/config.yaml`):
+```yaml
+session:
+  strategy: "smart-time"  # or "git-event"
+  smart_time:
+    base_timeout: "30m"
+    activity_check_interval: "5m"
+    extend_if_active: true
+
+storage:
+  db_path: "db.sqlite"
+  wal_mode: true
+
+daemon:
+  session_check_interval: "1m"
+```
+
+**Environment variable overrides:**
 ```bash
 export AI_PROVENANCE_HOME=/custom/path
+export AI_PROVENANCE_SESSION_STRATEGY=git-event
+export AI_PROVENANCE_SESSION_TIMEOUT=45m
 ./prov daemon start
 ```
 
@@ -190,14 +242,21 @@ The captured event includes:
 
 ## How It Works
 
-A background daemon stores AI interaction events in a local SQLite database:
+A background daemon stores AI interaction events in a local SQLite database with intelligent session management:
 
 ```
 Capture Adapters → Unix Socket → Storage Daemon → SQLite Database
-(coming soon)         ↓              ↓               ↓
-                   Commands      Event Store    ~/.ai-provenance/
+Claude Code Hooks     ↓         Session Manager        ↓
+Shell Wrappers     Commands      Event Store      ~/.ai-provenance/
 ```
 
+**Session Management:**
+- Automatically groups related prompts into sessions
+- Two strategies: `smart-time` (activity-based) and `git-event` (commit/branch-based)
+- Sessions end on inactivity timeout or git events (configurable)
+- Background process checks session boundaries every minute
+
+**Event Capture:**
 Each AI interaction captures metadata (agent, model, prompt/response), git context (branch, commit, dirty files), and developer context (author, IDE, workspace).
 
 See `ROADMAP.md` for architecture details and data schema.
@@ -225,7 +284,9 @@ Test suite runs in **~1.5s** for CLI integration tests.
 provenance/
 ├── cmd/prov/              # CLI and daemon entry point
 ├── internal/
+│   ├── config/            # Configuration system (YAML + env vars)
 │   ├── daemon/            # Unix socket server
+│   ├── session/           # Session management strategies
 │   ├── storage/           # SQLite database layer
 │   └── git/               # Git integration
 ├── ROADMAP.md             # Development roadmap and design decisions
