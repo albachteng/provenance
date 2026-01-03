@@ -166,7 +166,8 @@ func daemonRun() {
 		os.Exit(1)
 	}
 
-	repoPath, _ := findGitRoot() // TODO: may be empty if not in a repo
+	// Try to find git root, but it's OK if we're not in a repo (will use global config only)
+	repoPath, _ := findGitRoot() //nolint:errcheck
 	cfg, err := config.Load(provenanceHome, repoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)

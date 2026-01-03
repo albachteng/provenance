@@ -88,7 +88,10 @@ func (d *Daemon) Start() error {
 
 	close(d.ready)
 
+	// Create ticker for session checking
+	d.mu.Lock()
 	d.ticker = time.NewTicker(d.cfg.Daemon.SessionCheckInterval.Duration)
+	d.mu.Unlock()
 	d.wg.Add(1)
 	go d.sessionCheckLoop()
 
@@ -137,11 +140,12 @@ func (d *Daemon) Stop() error {
 	}
 	d.stopped = true
 	close(d.shutdown)
-	d.mu.Unlock()
 
+	// Stop ticker if running
 	if d.ticker != nil {
 		d.ticker.Stop()
 	}
+	d.mu.Unlock()
 
 	if d.listener != nil {
 		if err := d.listener.Close(); err != nil {

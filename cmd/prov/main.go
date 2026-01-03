@@ -284,7 +284,8 @@ func getProvenanceHome() string {
 // getConfig loads the configuration from all sources
 func getConfig() (*config.Config, error) {
 	provenanceHome := getProvenanceHome()
-	repoPath, _ := findGitRoot()
+	// Try to find git root, but it's OK if we're not in a repo (will use global config only)
+	repoPath, _ := findGitRoot() //nolint:errcheck
 	return config.Load(provenanceHome, repoPath)
 }
 
