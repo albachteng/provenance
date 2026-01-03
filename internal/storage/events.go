@@ -364,3 +364,50 @@ func UpdateSessionMetrics(db *sql.DB, sessionID string, promptsDelta, tokensDelt
 
 	return nil
 }
+
+// ListSessions returns all sessions, optionally filtered to only active ones
+func ListSessions(db *sql.DB, activeOnly bool) ([]*Session, error) {
+	query := `
+		SELECT id, start_time, end_time, repo_path, total_prompts, total_tokens, ended_by
+		FROM sessions
+	`
+
+	if activeOnly {
+		query += " WHERE end_time IS NULL"
+	}
+
+	query += " ORDER BY start_time DESC"
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sessions: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var sessions []*Session
+	for rows.Next() {
+		var s Session
+		var endTime sql.NullTime
+		var endedBy sql.NullString
+
+		err := rows.Scan(&s.ID, &s.StartTime, &endTime, &s.RepoPath, &s.TotalPrompts, &s.TotalTokens, &endedBy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+
+		if endTime.Valid {
+			s.EndTime = &endTime.Time
+		}
+		if endedBy.Valid {
+			s.EndedBy = endedBy.String
+		}
+
+		sessions = append(sessions, &s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating sessions: %w", err)
+	}
+
+	return sessions, nil
+}
