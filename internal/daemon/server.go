@@ -11,7 +11,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/albachteng/provenance/internal/config"
+	"github.com/albachteng/provenance/internal/session"
 	"github.com/albachteng/provenance/internal/storage"
 )
 
@@ -28,6 +31,11 @@ type Daemon struct {
 	wg         sync.WaitGroup
 	mu         sync.Mutex
 	stopped    bool
+
+	// Session management
+	sessionMgr *session.Manager
+	cfg        *config.Config
+	ticker     *time.Ticker
 }
 
 // SessionEvent represents a session lifecycle event
@@ -37,17 +45,25 @@ type SessionEvent struct {
 }
 
 // NewDaemon creates a new daemon instance
-func NewDaemon(db *sql.DB, socketPath string) (*Daemon, error) {
+func NewDaemon(db *sql.DB, socketPath string, sessionMgr *session.Manager, cfg *config.Config) (*Daemon, error) {
 	if db == nil {
 		return nil, errors.New("database cannot be nil")
 	}
 	if socketPath == "" {
 		return nil, errors.New("socket path cannot be empty")
 	}
+	if sessionMgr == nil {
+		return nil, errors.New("session manager cannot be nil")
+	}
+	if cfg == nil {
+		return nil, errors.New("config cannot be nil")
+	}
 
 	return &Daemon{
 		db:         db,
 		socketPath: socketPath,
+		sessionMgr: sessionMgr,
+		cfg:        cfg,
 		ready:      make(chan struct{}),
 		shutdown:   make(chan struct{}),
 	}, nil
@@ -71,6 +87,13 @@ func (d *Daemon) Start() error {
 	d.listener = listener
 
 	close(d.ready)
+
+	// Create ticker for session checking
+	d.mu.Lock()
+	d.ticker = time.NewTicker(d.cfg.Daemon.SessionCheckInterval.Duration)
+	d.mu.Unlock()
+	d.wg.Add(1)
+	go d.sessionCheckLoop()
 
 	for {
 		select {
@@ -117,6 +140,11 @@ func (d *Daemon) Stop() error {
 	}
 	d.stopped = true
 	close(d.shutdown)
+
+	// Stop ticker if running
+	if d.ticker != nil {
+		d.ticker.Stop()
+	}
 	d.mu.Unlock()
 
 	if d.listener != nil {
@@ -132,6 +160,20 @@ func (d *Daemon) Stop() error {
 	}
 
 	return nil
+}
+
+// sessionCheckLoop periodically checks if sessions should end
+func (d *Daemon) sessionCheckLoop() {
+	defer d.wg.Done()
+
+	for {
+		select {
+		case <-d.shutdown:
+			return
+		case <-d.ticker.C:
+			d.sessionMgr.CheckSessionBoundaries()
+		}
+	}
 }
 
 // handleConnection processes a single connection
