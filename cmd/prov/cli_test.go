@@ -378,7 +378,7 @@ func TestCLISessionListTableAlignment(t *testing.T) {
 		if strings.Contains(line, "ID") && strings.Contains(line, "Start Time") {
 			headerLine = line
 		} else if strings.Contains(line, "jobqueue") || strings.Contains(line, "dev-env") ||
-		           strings.Contains(line, "project") || (strings.Contains(line, "provenance") && !strings.Contains(line, "ID")) {
+			strings.Contains(line, "project") || (strings.Contains(line, "provenance") && !strings.Contains(line, "ID")) {
 			dataLines = append(dataLines, line)
 		}
 	}
