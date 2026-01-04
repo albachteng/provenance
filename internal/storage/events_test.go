@@ -685,10 +685,10 @@ func TestGetRepoStats(t *testing.T) {
 		TotalTokens:  0,
 	}
 	session2 := &Session{
-		ID:        "stats-session-2",
-		StartTime: now.Add(-1 * time.Hour),
-		EndTime:   nil,
-		RepoPath:  repoPath,
+		ID:           "stats-session-2",
+		StartTime:    now.Add(-1 * time.Hour),
+		EndTime:      nil,
+		RepoPath:     repoPath,
 		TotalPrompts: 0,
 		TotalTokens:  0,
 	}
