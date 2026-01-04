@@ -58,6 +58,28 @@ type Session struct {
 	EndedBy      string // 'commit' | 'timeout' | 'manual'
 }
 
+// RepoStats contains aggregate statistics for a repository
+type RepoStats struct {
+	TotalPrompts   int
+	TotalTokensIn  int
+	TotalTokensOut int
+	SessionCount   int
+	FilesMentioned map[string]int // file path -> mention count
+	ToolsInvoked   map[string]int // tool name -> invocation count
+}
+
+// SessionStats contains statistics for a specific session
+type SessionStats struct {
+	SessionID      string
+	TotalPrompts   int
+	TotalTokensIn  int
+	TotalTokensOut int
+	StartTime      time.Time
+	EndTime        *time.Time
+	FilesMentioned map[string]int // file path -> mention count
+	ToolsInvoked   map[string]int // tool name -> invocation count
+}
+
 // StorePromptEvent stores a prompt event in the database
 func StorePromptEvent(db *sql.DB, event *PromptEvent) error {
 	dirtyFilesJSON, err := json.Marshal(event.DirtyFiles)
@@ -363,4 +385,286 @@ func UpdateSessionMetrics(db *sql.DB, sessionID string, promptsDelta, tokensDelt
 	}
 
 	return nil
+}
+
+// ListSessions returns all sessions, optionally filtered to only active ones
+func ListSessions(db *sql.DB, activeOnly bool) ([]*Session, error) {
+	query := `
+		SELECT id, start_time, end_time, repo_path, total_prompts, total_tokens, ended_by
+		FROM sessions
+	`
+
+	if activeOnly {
+		query += " WHERE end_time IS NULL"
+	}
+
+	query += " ORDER BY start_time DESC"
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sessions: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var sessions []*Session
+	for rows.Next() {
+		var s Session
+		var startTimeUnix int64
+		var endTimeUnix sql.NullInt64
+		var endedBy sql.NullString
+
+		err := rows.Scan(&s.ID, &startTimeUnix, &endTimeUnix, &s.RepoPath, &s.TotalPrompts, &s.TotalTokens, &endedBy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+
+		s.StartTime = time.Unix(startTimeUnix, 0)
+
+		if endTimeUnix.Valid {
+			endTime := time.Unix(endTimeUnix.Int64, 0)
+			s.EndTime = &endTime
+		}
+		if endedBy.Valid {
+			s.EndedBy = endedBy.String
+		}
+
+		sessions = append(sessions, &s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating sessions: %w", err)
+	}
+
+	return sessions, nil
+}
+
+// GetRepoStats returns aggregate statistics for a repository
+func GetRepoStats(db *sql.DB, repoPath string) (*RepoStats, error) {
+	stats := &RepoStats{
+		FilesMentioned: make(map[string]int),
+		ToolsInvoked:   make(map[string]int),
+	}
+
+	// Get aggregate counts and session count
+	query := `
+		SELECT
+			COUNT(DISTINCT pe.id) as total_prompts,
+			COALESCE(SUM(pe.tokens_in), 0) as total_tokens_in,
+			COALESCE(SUM(pe.tokens_out), 0) as total_tokens_out,
+			COUNT(DISTINCT pe.session_id) as session_count
+		FROM prompt_events pe
+		WHERE pe.repo_path = ?
+	`
+
+	err := db.QueryRow(query, repoPath).Scan(
+		&stats.TotalPrompts,
+		&stats.TotalTokensIn,
+		&stats.TotalTokensOut,
+		&stats.SessionCount,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get aggregate stats: %w", err)
+	}
+
+	// Get all events to aggregate files and tools
+	eventsQuery := `
+		SELECT files_mentioned, tools_invoked
+		FROM prompt_events
+		WHERE repo_path = ?
+	`
+
+	rows, err := db.Query(eventsQuery, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	for rows.Next() {
+		var filesMentionedJSON, toolsInvokedJSON string
+
+		if err := rows.Scan(&filesMentionedJSON, &toolsInvokedJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan event: %w", err)
+		}
+
+		// Parse and aggregate files mentioned
+		var filesMentioned []string
+		if err := json.Unmarshal([]byte(filesMentionedJSON), &filesMentioned); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal files_mentioned: %w", err)
+		}
+		for _, file := range filesMentioned {
+			stats.FilesMentioned[file]++
+		}
+
+		// Parse and aggregate tools invoked
+		var toolsInvoked []string
+		if err := json.Unmarshal([]byte(toolsInvokedJSON), &toolsInvoked); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal tools_invoked: %w", err)
+		}
+		for _, tool := range toolsInvoked {
+			stats.ToolsInvoked[tool]++
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating events: %w", err)
+	}
+
+	return stats, nil
+}
+
+// GetSessionStats returns statistics for a specific session
+func GetSessionStats(db *sql.DB, sessionID string) (*SessionStats, error) {
+	// First get session metadata
+	session, err := GetSession(db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &SessionStats{
+		SessionID:      sessionID,
+		StartTime:      session.StartTime,
+		EndTime:        session.EndTime,
+		FilesMentioned: make(map[string]int),
+		ToolsInvoked:   make(map[string]int),
+	}
+
+	// Get aggregate counts for this session
+	query := `
+		SELECT
+			COUNT(id) as total_prompts,
+			COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+			COALESCE(SUM(tokens_out), 0) as total_tokens_out
+		FROM prompt_events
+		WHERE session_id = ?
+	`
+
+	err = db.QueryRow(query, sessionID).Scan(
+		&stats.TotalPrompts,
+		&stats.TotalTokensIn,
+		&stats.TotalTokensOut,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get aggregate stats: %w", err)
+	}
+
+	// Get all events to aggregate files and tools
+	eventsQuery := `
+		SELECT files_mentioned, tools_invoked
+		FROM prompt_events
+		WHERE session_id = ?
+	`
+
+	rows, err := db.Query(eventsQuery, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	for rows.Next() {
+		var filesMentionedJSON, toolsInvokedJSON string
+
+		if err := rows.Scan(&filesMentionedJSON, &toolsInvokedJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan event: %w", err)
+		}
+
+		// Parse and aggregate files mentioned
+		var filesMentioned []string
+		if err := json.Unmarshal([]byte(filesMentionedJSON), &filesMentioned); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal files_mentioned: %w", err)
+		}
+		for _, file := range filesMentioned {
+			stats.FilesMentioned[file]++
+		}
+
+		// Parse and aggregate tools invoked
+		var toolsInvoked []string
+		if err := json.Unmarshal([]byte(toolsInvokedJSON), &toolsInvoked); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal tools_invoked: %w", err)
+		}
+		for _, tool := range toolsInvoked {
+			stats.ToolsInvoked[tool]++
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating events: %w", err)
+	}
+
+	return stats, nil
+}
+
+// GetTimeframeStats returns statistics for a repository within a time window
+func GetTimeframeStats(db *sql.DB, repoPath string, since time.Time) (*RepoStats, error) {
+	stats := &RepoStats{
+		FilesMentioned: make(map[string]int),
+		ToolsInvoked:   make(map[string]int),
+	}
+
+	sinceUnix := since.Unix()
+
+	// Get aggregate counts and session count
+	query := `
+		SELECT
+			COUNT(DISTINCT pe.id) as total_prompts,
+			COALESCE(SUM(pe.tokens_in), 0) as total_tokens_in,
+			COALESCE(SUM(pe.tokens_out), 0) as total_tokens_out,
+			COUNT(DISTINCT pe.session_id) as session_count
+		FROM prompt_events pe
+		WHERE pe.repo_path = ? AND pe.timestamp >= ?
+	`
+
+	err := db.QueryRow(query, repoPath, sinceUnix).Scan(
+		&stats.TotalPrompts,
+		&stats.TotalTokensIn,
+		&stats.TotalTokensOut,
+		&stats.SessionCount,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get aggregate stats: %w", err)
+	}
+
+	// Get all events to aggregate files and tools
+	eventsQuery := `
+		SELECT files_mentioned, tools_invoked
+		FROM prompt_events
+		WHERE repo_path = ? AND timestamp >= ?
+	`
+
+	rows, err := db.Query(eventsQuery, repoPath, sinceUnix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	for rows.Next() {
+		var filesMentionedJSON, toolsInvokedJSON string
+
+		if err := rows.Scan(&filesMentionedJSON, &toolsInvokedJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan event: %w", err)
+		}
+
+		// Parse and aggregate files mentioned
+		var filesMentioned []string
+		if err := json.Unmarshal([]byte(filesMentionedJSON), &filesMentioned); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal files_mentioned: %w", err)
+		}
+		for _, file := range filesMentioned {
+			stats.FilesMentioned[file]++
+		}
+
+		// Parse and aggregate tools invoked
+		var toolsInvoked []string
+		if err := json.Unmarshal([]byte(toolsInvokedJSON), &toolsInvoked); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal tools_invoked: %w", err)
+		}
+		for _, tool := range toolsInvoked {
+			stats.ToolsInvoked[tool]++
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating events: %w", err)
+	}
+
+	return stats, nil
 }
