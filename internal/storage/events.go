@@ -387,16 +387,20 @@ func ListSessions(db *sql.DB, activeOnly bool) ([]*Session, error) {
 	var sessions []*Session
 	for rows.Next() {
 		var s Session
-		var endTime sql.NullTime
+		var startTimeUnix int64
+		var endTimeUnix sql.NullInt64
 		var endedBy sql.NullString
 
-		err := rows.Scan(&s.ID, &s.StartTime, &endTime, &s.RepoPath, &s.TotalPrompts, &s.TotalTokens, &endedBy)
+		err := rows.Scan(&s.ID, &startTimeUnix, &endTimeUnix, &s.RepoPath, &s.TotalPrompts, &s.TotalTokens, &endedBy)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 
-		if endTime.Valid {
-			s.EndTime = &endTime.Time
+		s.StartTime = time.Unix(startTimeUnix, 0)
+
+		if endTimeUnix.Valid {
+			endTime := time.Unix(endTimeUnix.Int64, 0)
+			s.EndTime = &endTime
 		}
 		if endedBy.Valid {
 			s.EndedBy = endedBy.String

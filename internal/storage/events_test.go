@@ -488,6 +488,698 @@ func TestUpdateSessionMetrics(t *testing.T) {
 	}
 }
 
+func TestListSessions(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Create multiple sessions with different states
+	now := time.Now().Truncate(time.Second)
+
+	// Active session 1
+	session1 := &Session{
+		ID:           "session-active-1",
+		StartTime:    now.Add(-2 * time.Hour),
+		EndTime:      nil,
+		RepoPath:     "/home/user/project1",
+		TotalPrompts: 5,
+		TotalTokens:  1000,
+		EndedBy:      "",
+	}
+	if err := CreateSession(db, session1); err != nil {
+		t.Fatalf("Failed to create session1: %v", err)
+	}
+
+	// Active session 2
+	session2 := &Session{
+		ID:           "session-active-2",
+		StartTime:    now.Add(-1 * time.Hour),
+		EndTime:      nil,
+		RepoPath:     "/home/user/project2",
+		TotalPrompts: 3,
+		TotalTokens:  500,
+		EndedBy:      "",
+	}
+	if err := CreateSession(db, session2); err != nil {
+		t.Fatalf("Failed to create session2: %v", err)
+	}
+
+	// Ended session
+	endTime := now.Add(-30 * time.Minute)
+	session3 := &Session{
+		ID:           "session-ended-1",
+		StartTime:    now.Add(-3 * time.Hour),
+		EndTime:      &endTime,
+		RepoPath:     "/home/user/project3",
+		TotalPrompts: 10,
+		TotalTokens:  2000,
+		EndedBy:      "timeout",
+	}
+	if err := CreateSession(db, session3); err != nil {
+		t.Fatalf("Failed to create session3: %v", err)
+	}
+
+	// Test listing all sessions
+	t.Run("list all sessions", func(t *testing.T) {
+		sessions, err := ListSessions(db, false)
+		if err != nil {
+			t.Fatalf("ListSessions failed: %v", err)
+		}
+
+		if len(sessions) != 3 {
+			t.Errorf("Expected 3 sessions, got %d", len(sessions))
+		}
+
+		// Sessions should be ordered by start_time DESC (newest first)
+		if sessions[0].ID != "session-active-2" {
+			t.Errorf("Expected first session to be session-active-2, got %s", sessions[0].ID)
+		}
+	})
+
+	// Test listing only active sessions
+	t.Run("list active sessions only", func(t *testing.T) {
+		sessions, err := ListSessions(db, true)
+		if err != nil {
+			t.Fatalf("ListSessions failed: %v", err)
+		}
+
+		if len(sessions) != 2 {
+			t.Errorf("Expected 2 active sessions, got %d", len(sessions))
+		}
+
+		// Verify all returned sessions are active
+		for _, s := range sessions {
+			if s.EndTime != nil {
+				t.Errorf("Expected active session, but session %s has end_time", s.ID)
+			}
+		}
+	})
+
+	// Test empty result
+	t.Run("empty database", func(t *testing.T) {
+		emptyDB := setupTestDB(t)
+		defer emptyDB.Close()
+
+		sessions, err := ListSessions(emptyDB, false)
+		if err != nil {
+			t.Fatalf("ListSessions failed: %v", err)
+		}
+
+		if len(sessions) != 0 {
+			t.Errorf("Expected 0 sessions, got %d", len(sessions))
+		}
+	})
+}
+
+func TestListSessionsOrderAndFields(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	now := time.Now().Truncate(time.Second)
+
+	// Create sessions in non-chronological order
+	sessions := []*Session{
+		{
+			ID:           "session-3",
+			StartTime:    now.Add(-3 * time.Hour),
+			RepoPath:     "/repo3",
+			TotalPrompts: 1,
+			TotalTokens:  100,
+		},
+		{
+			ID:           "session-1",
+			StartTime:    now.Add(-1 * time.Hour),
+			RepoPath:     "/repo1",
+			TotalPrompts: 3,
+			TotalTokens:  300,
+		},
+		{
+			ID:           "session-2",
+			StartTime:    now.Add(-2 * time.Hour),
+			RepoPath:     "/repo2",
+			TotalPrompts: 2,
+			TotalTokens:  200,
+		},
+	}
+
+	for _, s := range sessions {
+		if err := CreateSession(db, s); err != nil {
+			t.Fatalf("Failed to create session %s: %v", s.ID, err)
+		}
+	}
+
+	// List all sessions
+	result, err := ListSessions(db, false)
+	if err != nil {
+		t.Fatalf("ListSessions failed: %v", err)
+	}
+
+	// Verify ordering (newest first)
+	expectedOrder := []string{"session-1", "session-2", "session-3"}
+	for i, expected := range expectedOrder {
+		if result[i].ID != expected {
+			t.Errorf("Expected session %d to be %s, got %s", i, expected, result[i].ID)
+		}
+	}
+
+	// Verify all fields are populated correctly
+	// Map by ID for easier verification
+	sessionMap := make(map[string]*Session)
+	for _, s := range sessions {
+		sessionMap[s.ID] = s
+	}
+
+	for _, s := range result {
+		original := sessionMap[s.ID]
+		if original == nil {
+			t.Errorf("Session %s not found in original list", s.ID)
+			continue
+		}
+
+		if s.RepoPath != original.RepoPath {
+			t.Errorf("Session %s: expected repo %s, got %s", s.ID, original.RepoPath, s.RepoPath)
+		}
+		if s.TotalPrompts != original.TotalPrompts {
+			t.Errorf("Session %s: expected %d prompts, got %d", s.ID, original.TotalPrompts, s.TotalPrompts)
+		}
+		if s.TotalTokens != original.TotalTokens {
+			t.Errorf("Session %s: expected %d tokens, got %d", s.ID, original.TotalTokens, s.TotalTokens)
+		}
+	}
+}
+
+// TestGetRepoStats tests getting aggregate statistics for a repository
+func TestGetRepoStats(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repoPath := "/home/user/test-project"
+	now := time.Now().Truncate(time.Second)
+
+	// Create two sessions
+	session1 := &Session{
+		ID:           "stats-session-1",
+		StartTime:    now.Add(-2 * time.Hour),
+		EndTime:      nil,
+		RepoPath:     repoPath,
+		TotalPrompts: 0,
+		TotalTokens:  0,
+	}
+	session2 := &Session{
+		ID:        "stats-session-2",
+		StartTime: now.Add(-1 * time.Hour),
+		EndTime:   nil,
+		RepoPath:  repoPath,
+		TotalPrompts: 0,
+		TotalTokens:  0,
+	}
+
+	if err := CreateSession(db, session1); err != nil {
+		t.Fatalf("Failed to create session1: %v", err)
+	}
+	if err := CreateSession(db, session2); err != nil {
+		t.Fatalf("Failed to create session2: %v", err)
+	}
+
+	// Create prompt events across both sessions
+	events := []*PromptEvent{
+		{
+			ID:             "stats-event-1",
+			Timestamp:      now.Add(-90 * time.Minute),
+			SessionID:      "stats-session-1",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Fix bug in auth",
+			ResponseText:   "Here's the fix...",
+			TokensIn:       100,
+			TokensOut:      300,
+			LatencyMs:      1000,
+			RepoPath:       repoPath,
+			GitCommit:      "abc123",
+			GitBranch:      "main",
+			GitDirty:       true,
+			DirtyFiles:     []string{"src/auth.go"},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "src/auth.go",
+			WorkspaceFiles: []string{"src/auth.go", "src/main.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"read_file", "write_file"},
+			FilesMentioned: []string{"src/auth.go"},
+		},
+		{
+			ID:             "stats-event-2",
+			Timestamp:      now.Add(-60 * time.Minute),
+			SessionID:      "stats-session-1",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Add tests",
+			ResponseText:   "I'll add tests...",
+			TokensIn:       150,
+			TokensOut:      400,
+			LatencyMs:      1200,
+			RepoPath:       repoPath,
+			GitCommit:      "abc123",
+			GitBranch:      "main",
+			GitDirty:       true,
+			DirtyFiles:     []string{"src/auth_test.go"},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "src/auth_test.go",
+			WorkspaceFiles: []string{"src/auth.go", "src/auth_test.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"read_file", "write_file", "bash"},
+			FilesMentioned: []string{"src/auth.go", "src/auth_test.go"},
+		},
+		{
+			ID:             "stats-event-3",
+			Timestamp:      now.Add(-30 * time.Minute),
+			SessionID:      "stats-session-2",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Refactor database code",
+			ResponseText:   "Let's refactor...",
+			TokensIn:       200,
+			TokensOut:      500,
+			LatencyMs:      1500,
+			RepoPath:       repoPath,
+			GitCommit:      "def456",
+			GitBranch:      "feature/db",
+			GitDirty:       false,
+			DirtyFiles:     []string{},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "src/db.go",
+			WorkspaceFiles: []string{"src/db.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"read_file", "edit"},
+			FilesMentioned: []string{"src/db.go"},
+		},
+	}
+
+	for _, event := range events {
+		if err := StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event %s: %v", event.ID, err)
+		}
+	}
+
+	// Test getting repo stats
+	stats, err := GetRepoStats(db, repoPath)
+	if err != nil {
+		t.Fatalf("GetRepoStats failed: %v", err)
+	}
+
+	// Verify aggregate counts
+	if stats.TotalPrompts != 3 {
+		t.Errorf("Expected 3 total prompts, got %d", stats.TotalPrompts)
+	}
+
+	expectedTokensIn := 100 + 150 + 200
+	if stats.TotalTokensIn != expectedTokensIn {
+		t.Errorf("Expected %d tokens in, got %d", expectedTokensIn, stats.TotalTokensIn)
+	}
+
+	expectedTokensOut := 300 + 400 + 500
+	if stats.TotalTokensOut != expectedTokensOut {
+		t.Errorf("Expected %d tokens out, got %d", expectedTokensOut, stats.TotalTokensOut)
+	}
+
+	if stats.SessionCount != 2 {
+		t.Errorf("Expected 2 sessions, got %d", stats.SessionCount)
+	}
+
+	// Verify file mention counts
+	expectedFileMentions := map[string]int{
+		"src/auth.go":      2,
+		"src/auth_test.go": 1,
+		"src/db.go":        1,
+	}
+
+	for file, expectedCount := range expectedFileMentions {
+		if count, ok := stats.FilesMentioned[file]; !ok {
+			t.Errorf("Expected file %s to be mentioned, but not found", file)
+		} else if count != expectedCount {
+			t.Errorf("File %s: expected %d mentions, got %d", file, expectedCount, count)
+		}
+	}
+
+	// Verify tool usage counts
+	expectedToolUsage := map[string]int{
+		"read_file":  3,
+		"write_file": 2,
+		"bash":       1,
+		"edit":       1,
+	}
+
+	for tool, expectedCount := range expectedToolUsage {
+		if count, ok := stats.ToolsInvoked[tool]; !ok {
+			t.Errorf("Expected tool %s to be invoked, but not found", tool)
+		} else if count != expectedCount {
+			t.Errorf("Tool %s: expected %d invocations, got %d", tool, expectedCount, count)
+		}
+	}
+}
+
+// TestGetSessionStats tests getting statistics for a specific session
+func TestGetSessionStats(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repoPath := "/home/user/test-project"
+	now := time.Now().Truncate(time.Second)
+
+	// Create session
+	session := &Session{
+		ID:           "stats-session-specific",
+		StartTime:    now.Add(-1 * time.Hour),
+		EndTime:      nil,
+		RepoPath:     repoPath,
+		TotalPrompts: 0,
+		TotalTokens:  0,
+	}
+
+	if err := CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Create events for this session
+	events := []*PromptEvent{
+		{
+			ID:             "session-event-1",
+			Timestamp:      now.Add(-50 * time.Minute),
+			SessionID:      "stats-session-specific",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Implement feature X",
+			ResponseText:   "Here's how...",
+			TokensIn:       120,
+			TokensOut:      350,
+			LatencyMs:      1100,
+			RepoPath:       repoPath,
+			GitCommit:      "abc123",
+			GitBranch:      "main",
+			GitDirty:       false,
+			DirtyFiles:     []string{},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "src/feature.go",
+			WorkspaceFiles: []string{"src/feature.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"write_file"},
+			FilesMentioned: []string{"src/feature.go"},
+		},
+		{
+			ID:             "session-event-2",
+			Timestamp:      now.Add(-30 * time.Minute),
+			SessionID:      "stats-session-specific",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Add error handling",
+			ResponseText:   "Let me add that...",
+			TokensIn:       80,
+			TokensOut:      250,
+			LatencyMs:      900,
+			RepoPath:       repoPath,
+			GitCommit:      "abc123",
+			GitBranch:      "main",
+			GitDirty:       true,
+			DirtyFiles:     []string{"src/feature.go"},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "src/feature.go",
+			WorkspaceFiles: []string{"src/feature.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"edit", "read_file"},
+			FilesMentioned: []string{"src/feature.go"},
+		},
+	}
+
+	for _, event := range events {
+		if err := StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event %s: %v", event.ID, err)
+		}
+	}
+
+	// Test getting session-specific stats
+	stats, err := GetSessionStats(db, "stats-session-specific")
+	if err != nil {
+		t.Fatalf("GetSessionStats failed: %v", err)
+	}
+
+	if stats.SessionID != "stats-session-specific" {
+		t.Errorf("Expected session ID 'stats-session-specific', got %s", stats.SessionID)
+	}
+
+	if stats.TotalPrompts != 2 {
+		t.Errorf("Expected 2 prompts, got %d", stats.TotalPrompts)
+	}
+
+	expectedTokensIn := 120 + 80
+	if stats.TotalTokensIn != expectedTokensIn {
+		t.Errorf("Expected %d tokens in, got %d", expectedTokensIn, stats.TotalTokensIn)
+	}
+
+	expectedTokensOut := 350 + 250
+	if stats.TotalTokensOut != expectedTokensOut {
+		t.Errorf("Expected %d tokens out, got %d", expectedTokensOut, stats.TotalTokensOut)
+	}
+
+	// Verify session timing
+	if !stats.StartTime.Equal(session.StartTime) {
+		t.Errorf("Expected start time %v, got %v", session.StartTime, stats.StartTime)
+	}
+
+	if stats.EndTime != nil {
+		t.Errorf("Expected nil end time for active session, got %v", stats.EndTime)
+	}
+
+	// Verify file mentions
+	if count, ok := stats.FilesMentioned["src/feature.go"]; !ok {
+		t.Error("Expected src/feature.go to be mentioned")
+	} else if count != 2 {
+		t.Errorf("Expected src/feature.go to be mentioned 2 times, got %d", count)
+	}
+
+	// Verify tool usage
+	expectedTools := map[string]int{
+		"write_file": 1,
+		"edit":       1,
+		"read_file":  1,
+	}
+
+	for tool, expectedCount := range expectedTools {
+		if count, ok := stats.ToolsInvoked[tool]; !ok {
+			t.Errorf("Expected tool %s to be invoked", tool)
+		} else if count != expectedCount {
+			t.Errorf("Tool %s: expected %d invocations, got %d", tool, expectedCount, count)
+		}
+	}
+}
+
+// TestGetTimeframeStats tests getting statistics for a specific time window
+func TestGetTimeframeStats(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repoPath := "/home/user/test-project"
+	now := time.Now().Truncate(time.Second)
+
+	// Create session
+	session := &Session{
+		ID:           "stats-timeframe-session",
+		StartTime:    now.Add(-10 * 24 * time.Hour), // 10 days ago
+		EndTime:      nil,
+		RepoPath:     repoPath,
+		TotalPrompts: 0,
+		TotalTokens:  0,
+	}
+
+	if err := CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Create events at different times
+	events := []*PromptEvent{
+		{
+			// 9 days ago - should be included in "last 7 days"? No
+			ID:             "timeframe-event-1",
+			Timestamp:      now.Add(-9 * 24 * time.Hour),
+			SessionID:      "stats-timeframe-session",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Old event",
+			ResponseText:   "Response",
+			TokensIn:       50,
+			TokensOut:      100,
+			LatencyMs:      500,
+			RepoPath:       repoPath,
+			GitCommit:      "old123",
+			GitBranch:      "main",
+			GitDirty:       false,
+			DirtyFiles:     []string{},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "old.go",
+			WorkspaceFiles: []string{"old.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"read_file"},
+			FilesMentioned: []string{"old.go"},
+		},
+		{
+			// 3 days ago - should be included
+			ID:             "timeframe-event-2",
+			Timestamp:      now.Add(-3 * 24 * time.Hour),
+			SessionID:      "stats-timeframe-session",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Recent event 1",
+			ResponseText:   "Response",
+			TokensIn:       100,
+			TokensOut:      200,
+			LatencyMs:      800,
+			RepoPath:       repoPath,
+			GitCommit:      "recent123",
+			GitBranch:      "main",
+			GitDirty:       false,
+			DirtyFiles:     []string{},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "recent.go",
+			WorkspaceFiles: []string{"recent.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"write_file"},
+			FilesMentioned: []string{"recent.go"},
+		},
+		{
+			// 1 day ago - should be included
+			ID:             "timeframe-event-3",
+			Timestamp:      now.Add(-1 * 24 * time.Hour),
+			SessionID:      "stats-timeframe-session",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Recent event 2",
+			ResponseText:   "Response",
+			TokensIn:       150,
+			TokensOut:      300,
+			LatencyMs:      1000,
+			RepoPath:       repoPath,
+			GitCommit:      "recent456",
+			GitBranch:      "main",
+			GitDirty:       false,
+			DirtyFiles:     []string{},
+			Author:         "testuser",
+			IDE:            "vscode",
+			ActiveFile:     "recent.go",
+			WorkspaceFiles: []string{"recent.go"},
+			PromptType:     "chat",
+			ToolsInvoked:   []string{"edit"},
+			FilesMentioned: []string{"recent.go"},
+		},
+	}
+
+	for _, event := range events {
+		if err := StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event %s: %v", event.ID, err)
+		}
+	}
+
+	// Test getting stats for last 7 days
+	since := now.Add(-7 * 24 * time.Hour)
+	stats, err := GetTimeframeStats(db, repoPath, since)
+	if err != nil {
+		t.Fatalf("GetTimeframeStats failed: %v", err)
+	}
+
+	// Should only include events 2 and 3 (3 days ago and 1 day ago)
+	if stats.TotalPrompts != 2 {
+		t.Errorf("Expected 2 prompts in last 7 days, got %d", stats.TotalPrompts)
+	}
+
+	expectedTokensIn := 100 + 150
+	if stats.TotalTokensIn != expectedTokensIn {
+		t.Errorf("Expected %d tokens in, got %d", expectedTokensIn, stats.TotalTokensIn)
+	}
+
+	expectedTokensOut := 200 + 300
+	if stats.TotalTokensOut != expectedTokensOut {
+		t.Errorf("Expected %d tokens out, got %d", expectedTokensOut, stats.TotalTokensOut)
+	}
+
+	// Verify only recent file is counted
+	if count, ok := stats.FilesMentioned["recent.go"]; !ok {
+		t.Error("Expected recent.go to be mentioned")
+	} else if count != 2 {
+		t.Errorf("Expected recent.go to be mentioned 2 times, got %d", count)
+	}
+
+	if _, ok := stats.FilesMentioned["old.go"]; ok {
+		t.Error("Did not expect old.go to be mentioned in recent stats")
+	}
+
+	// Verify only recent tools are counted
+	expectedTools := map[string]int{
+		"write_file": 1,
+		"edit":       1,
+	}
+
+	for tool, expectedCount := range expectedTools {
+		if count, ok := stats.ToolsInvoked[tool]; !ok {
+			t.Errorf("Expected tool %s to be invoked", tool)
+		} else if count != expectedCount {
+			t.Errorf("Tool %s: expected %d invocations, got %d", tool, expectedCount, count)
+		}
+	}
+
+	if _, ok := stats.ToolsInvoked["read_file"]; ok {
+		t.Error("Did not expect read_file to be counted in recent stats")
+	}
+}
+
+// TestGetRepoStatsEmptyRepo tests stats for a repo with no events
+func TestGetRepoStatsEmptyRepo(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	stats, err := GetRepoStats(db, "/nonexistent/repo")
+	if err != nil {
+		t.Fatalf("GetRepoStats failed: %v", err)
+	}
+
+	if stats.TotalPrompts != 0 {
+		t.Errorf("Expected 0 prompts, got %d", stats.TotalPrompts)
+	}
+
+	if stats.TotalTokensIn != 0 {
+		t.Errorf("Expected 0 tokens in, got %d", stats.TotalTokensIn)
+	}
+
+	if stats.TotalTokensOut != 0 {
+		t.Errorf("Expected 0 tokens out, got %d", stats.TotalTokensOut)
+	}
+
+	if stats.SessionCount != 0 {
+		t.Errorf("Expected 0 sessions, got %d", stats.SessionCount)
+	}
+
+	if len(stats.FilesMentioned) != 0 {
+		t.Errorf("Expected 0 file mentions, got %d", len(stats.FilesMentioned))
+	}
+
+	if len(stats.ToolsInvoked) != 0 {
+		t.Errorf("Expected 0 tool invocations, got %d", len(stats.ToolsInvoked))
+	}
+}
+
+// TestGetSessionStatsNotFound tests getting stats for non-existent session
+func TestGetSessionStatsNotFound(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	_, err := GetSessionStats(db, "nonexistent-session")
+	if err != ErrNotFound {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+}
+
 // setupTestDB creates a temporary database for testing
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
