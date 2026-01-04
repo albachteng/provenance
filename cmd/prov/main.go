@@ -48,6 +48,8 @@ func main() {
 		cmdShow()
 	case "search":
 		cmdSearch()
+	case "session":
+		cmdSession()
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -71,6 +73,10 @@ func printUsage() {
 	fmt.Println("  config init          Create repo config file")
 	fmt.Println("  config init --global Create global config file")
 	fmt.Println("  config validate      Validate configuration")
+	fmt.Println("  session list         List all sessions")
+	fmt.Println("  session list --active List active sessions")
+	fmt.Println("  session show <id>    Show session details")
+	fmt.Println("  session end <id>     Manually end a session")
 	fmt.Println("  list                 List recent prompts")
 	fmt.Println("  show <id>            Show prompt details")
 	fmt.Println("  search <query>       Search prompts")

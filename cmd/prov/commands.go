@@ -930,3 +930,217 @@ func configValidate() {
 
 	fmt.Printf("Session strategy: %s\n", strategy.Name())
 }
+
+// Session command implementations
+
+func cmdSession() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov session <list|show|end>")
+		os.Exit(1)
+	}
+
+	subcommand := os.Args[2]
+
+	switch subcommand {
+	case "list":
+		sessionList()
+	case "show":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: prov session show <id>")
+			os.Exit(1)
+		}
+		sessionShow(os.Args[3])
+	case "end":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: prov session end <id>")
+			os.Exit(1)
+		}
+		sessionEnd(os.Args[3])
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown session command: %s\n", subcommand)
+		fmt.Fprintln(os.Stderr, "Usage: prov session <list|show|end>")
+		os.Exit(1)
+	}
+}
+
+func sessionList() {
+	// Check for --active flag
+	activeOnly := false
+	for _, arg := range os.Args[3:] {
+		if arg == "--active" {
+			activeOnly = true
+			break
+		}
+	}
+
+	db, err := openDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close() //nolint:errcheck
+
+	sessions, err := storage.ListSessions(db, activeOnly)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list sessions: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(sessions) == 0 {
+		if activeOnly {
+			fmt.Println("No active sessions")
+		} else {
+			fmt.Println("No sessions found")
+		}
+		return
+	}
+
+	// Print header
+	fmt.Printf("%-25s %-20s %-10s %-8s %-20s %s\n", "ID", "Start Time", "Duration", "Prompts", "Repo", "Status")
+	fmt.Println(strings.Repeat("-", 120))
+
+	// Print sessions
+	for _, s := range sessions {
+		startTime := s.StartTime.Format("2006-01-02 15:04:05")
+
+		var duration string
+		var status string
+		if s.EndTime == nil {
+			duration = formatDuration(time.Since(s.StartTime))
+			status = "Active"
+		} else {
+			duration = formatDuration(s.EndTime.Sub(s.StartTime))
+			if s.EndedBy != "" {
+				status = fmt.Sprintf("Ended (%s)", s.EndedBy)
+			} else {
+				status = "Ended"
+			}
+		}
+
+		// Shorten repo path to just the last component
+		repoName := filepath.Base(s.RepoPath)
+		if repoName == "." || repoName == "/" {
+			repoName = s.RepoPath
+		}
+
+		fmt.Printf("%-25s %-20s %-10s %-8d %-20s %s\n",
+			s.ID, startTime, duration, s.TotalPrompts, repoName, status)
+	}
+
+	fmt.Printf("\nShowing %d session(s)\n", len(sessions))
+}
+
+func sessionShow(sessionID string) {
+	db, err := openDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close() //nolint:errcheck
+
+	session, err := storage.GetSession(db, sessionID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			fmt.Fprintf(os.Stderr, "Session not found: %s\n", sessionID)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Failed to get session: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print session details
+	fmt.Printf("Session ID: %s\n", session.ID)
+	fmt.Printf("Repository: %s\n", session.RepoPath)
+	fmt.Printf("Start Time: %s\n", session.StartTime.Format("2006-01-02 15:04:05"))
+
+	if session.EndTime == nil {
+		fmt.Printf("Status: Active (duration: %s)\n", formatDuration(time.Since(session.StartTime)))
+	} else {
+		fmt.Printf("End Time: %s\n", session.EndTime.Format("2006-01-02 15:04:05"))
+		fmt.Printf("Duration: %s\n", formatDuration(session.EndTime.Sub(session.StartTime)))
+		if session.EndedBy != "" {
+			fmt.Printf("Ended By: %s\n", session.EndedBy)
+		}
+	}
+
+	fmt.Printf("Total Prompts: %d\n", session.TotalPrompts)
+	fmt.Printf("Total Tokens: %d\n", session.TotalTokens)
+	fmt.Println()
+
+	// List all prompts in this session
+	events, err := storage.ListPromptEvents(db, sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list prompts: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(events) == 0 {
+		fmt.Println("No prompts in this session")
+		return
+	}
+
+	fmt.Printf("Prompts (%d):\n", len(events))
+	fmt.Printf("%-25s %-20s %-15s %s\n", "ID", "Timestamp", "Agent", "Prompt")
+	fmt.Println(strings.Repeat("-", 120))
+
+	for _, event := range events {
+		timestamp := event.Timestamp.Format("2006-01-02 15:04:05")
+		promptPreview := event.PromptText
+		if len(promptPreview) > 60 {
+			promptPreview = promptPreview[:57] + "..."
+		}
+
+		fmt.Printf("%-25s %-20s %-15s %s\n", event.ID, timestamp, event.Agent, promptPreview)
+	}
+}
+
+func sessionEnd(sessionID string) {
+	db, err := openDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close() //nolint:errcheck
+
+	// Check if session exists and is active
+	session, err := storage.GetSession(db, sessionID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			fmt.Fprintf(os.Stderr, "Session not found: %s\n", sessionID)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Failed to get session: %v\n", err)
+		os.Exit(1)
+	}
+
+	if session.EndTime != nil {
+		fmt.Fprintf(os.Stderr, "Session is already ended\n")
+		os.Exit(1)
+	}
+
+	// End the session
+	if err := storage.EndSession(db, sessionID, time.Now(), "manual"); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to end session: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Session %s ended successfully\n", sessionID)
+}
+
+// formatDuration formats a duration in a human-readable way
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		hours := int(d.Hours())
+		minutes := int(d.Minutes()) % 60
+		return fmt.Sprintf("%dh%dm", hours, minutes)
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	return fmt.Sprintf("%dd%dh", days, hours)
+}

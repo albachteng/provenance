@@ -667,57 +667,174 @@ Used in: `waitForEvent()`, `waitForSession()`, `waitForEventCount()`
 
 **Goal**: Make the data actionable for tech leads
 
-### Deliverables
-- [ ] **Advanced queries**:
-  ```bash
-  prov stats                           # Token usage, costs, latency
-  prov stats --by-agent                # Per-agent breakdown
-  prov stats --by-author               # Per-developer
-  prov stats --since "1 week ago"
+**Status**: Breaking into 6 independent features for incremental delivery
 
-  prov blame <file>                    # Prompts that changed this file
-  prov blame <commit>                  # Prompts in this commit window
+### Feature Breakdown (Recommended Order)
 
-  prov diff <prompt-id>                # Show estimated changes
-  prov session <id>                    # All prompts in session
-  prov session <id> --export json      # Export for analysis
+#### Feature 1: Session Query Commands ✅
+**Goal**: Make sessions queryable and useful
 
-  prov search "refactor"               # Full-text search
-  prov search --file "*.go"            # Filter by files mentioned
-  ```
+**Commands:**
+```bash
+prov session list                    # List all sessions
+prov session list --active           # Show only active sessions
+prov session show <id>               # Show session details + all prompts
+prov session end <id>                # Manually end a session
+```
 
-- [ ] **Correlation improvements**:
-  - Git hook: `post-commit` → link prompts from last 10 minutes
-  - Confidence scoring based on:
-    - Time delta (closer = higher)
-    - File overlap (mentioned in prompt = higher)
-    - Manual confirmation (user-tagged = 1.0)
+**Database work:**
+- Queries on existing `sessions` and `prompt_events` tables
+- No schema changes needed
 
-  - Manual tagging:
-    ```bash
-    prov tag <prompt-id> --commit <sha>
-    ```
+**Value**: Understand what sessions exist, when they started/ended, what happened in them
 
-- [ ] **Export formats**:
-  ```bash
-  prov export --format csv --since "1 month ago"
-  prov export --format json --output report.json
-  ```
+**Estimated complexity**: Low (mostly SQL queries + formatting)
 
-- [ ] **Git integration**:
-  ```bash
-  # Install git hook
-  prov install-hook post-commit
+---
 
-  # Annotated commits (optional, via commit message template)
-  git config commit.template ~/.ai-provenance/commit-template
-  ```
+#### Feature 2: Basic Statistics Commands ✅
+**Goal**: Aggregate usage metrics
 
-### Success Criteria
-- Tech lead can run weekly stats, see token usage by team
-- Can trace a bug back to originating prompt
-- Can export data for custom analysis
-- Git commits auto-linked to recent prompts
+**Storage layer implementation** (COMPLETE):
+```go
+// Aggregate statistics for a repository
+func GetRepoStats(db *sql.DB, repoPath string) (*RepoStats, error)
+
+// Statistics for a specific session
+func GetSessionStats(db *sql.DB, sessionID string) (*SessionStats, error)
+
+// Time-filtered statistics
+func GetTimeframeStats(db *sql.DB, repoPath string, since time.Time) (*RepoStats, error)
+```
+
+**RepoStats includes:**
+- Total prompts, tokens in/out
+- Session count
+- File mention counts (which files were worked on)
+- Tool usage distribution (read_file, write_file, bash, etc.)
+
+**SessionStats includes:**
+- Session-specific prompt/token metrics
+- Session timing (start/end times)
+- File mentions within session
+- Tool usage for session
+
+**Database work:** ✅
+- Aggregation queries (COUNT, SUM, GROUP BY)
+- JSON array unpacking for file/tool aggregation
+- Time-based filtering
+
+**Value**: Foundation for analytics CLI - provides queryable metrics about AI tool usage
+
+**Estimated complexity**: Low-Medium (SQL aggregations + JSON parsing)
+
+**Status**: Storage layer complete with comprehensive test coverage (5 test functions, all passing)
+
+---
+
+#### Feature 3: Export Functionality
+**Goal**: Extract data for external analysis
+
+**Commands:**
+```bash
+prov export --format json            # Export all data as JSON
+prov export --format csv             # Export as CSV
+prov export --session <id>           # Export specific session
+prov export --since "2 weeks ago"    # Time-filtered export
+prov export --output report.json     # Custom output file
+```
+
+**Database work:**
+- SELECT queries with filters
+- JSON/CSV serialization
+
+**Value**: Enable custom analysis in spreadsheets, notebooks, BI tools
+
+**Estimated complexity**: Medium (format conversion, streaming for large datasets)
+
+---
+
+#### Feature 4: Git Post-Commit Hook (The Big One)
+**Goal**: Automatically link prompts to commits
+
+**Implementation:**
+```bash
+prov install-hook post-commit        # Install git hook
+```
+
+**Hook behavior:**
+- On commit, find recent session (or prompts from last 10 minutes)
+- Create `change_sets` entries linking prompts → commit
+- Calculate confidence based on:
+  - Time delta (closer = higher)
+  - File overlap (mentioned files in prompt vs changed files)
+
+**Database work:**
+- Implement `change_sets` table (already in schema!)
+- Store prompt → commit associations
+- Confidence scoring logic
+
+**Value**: **This is the killer feature** - trace code back to AI prompts
+
+**Estimated complexity**: High (git hook, correlation logic, confidence scoring)
+
+---
+
+#### Feature 5: Blame/Trace Commands
+**Goal**: Reverse lookup - code → prompts
+
+**Commands:**
+```bash
+prov blame <file>                    # Prompts that touched this file
+prov blame <commit>                  # Prompts linked to this commit
+prov trace <file> --lines 10-20      # Prompts for specific lines (future)
+```
+
+**Database work:**
+- Query `change_sets` table
+- Join with `prompt_events` for full context
+
+**Value**: "Who (or what AI) wrote this code?"
+
+**Estimated complexity**: Medium (depends on Feature 4 completion)
+
+**Dependency**: Requires Feature 4 (git correlation)
+
+---
+
+#### Feature 6: Manual Tagging
+**Goal**: User corrections for correlation
+
+**Commands:**
+```bash
+prov tag <prompt-id> --commit <sha>  # Manual association
+prov tag <prompt-id> --file <path>   # Associate with file
+prov untag <prompt-id> <commit>      # Remove association
+```
+
+**Database work:**
+- Insert into `change_sets` with confidence = 1.0
+- Mark as `correlation_method = 'manual'`
+
+**Value**: Override auto-correlation when it's wrong
+
+**Estimated complexity**: Low (simple database inserts)
+
+**Dependency**: Requires Feature 4 schema
+
+---
+
+### Overall Success Criteria
+- [x] Phase broken into 6 independent features
+- [x] Feature 1: Session queries (1-2 hours) - COMPLETE
+- [x] Feature 2: Basic stats storage layer (2-3 hours) - COMPLETE
+- [ ] Feature 3: Export (2-4 hours)
+- [ ] Feature 4: Git correlation (6-8 hours)
+- [ ] Feature 5: Blame commands (2-3 hours)
+- [ ] Feature 6: Manual tagging (1-2 hours)
+
+**Total estimated time**: 14-22 hours across 6 features
+**Completed**: 3-5 hours (Features 1-2)
 
 ---
 
