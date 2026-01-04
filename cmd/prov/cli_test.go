@@ -327,3 +327,127 @@ func runCLI(t *testing.T, args ...string) (string, error) {
 
 	return output, err
 }
+
+// TestCLISessionListTableAlignment tests that session IDs are truncated
+// to prevent table misalignment when mixing long UUIDs and short IDs
+func TestCLISessionListTableAlignment(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	now := time.Now()
+
+	// Create sessions with different ID lengths to test alignment
+	sessions := []struct {
+		id       string
+		repoPath string
+	}{
+		// Long UUID (36 chars) - typical production session
+		{"780bed8d-9aeb-4303-87de-be31e39bfef9", "/home/user/jobqueue"},
+		// Another long UUID
+		{"0fe4aa04-441b-4ca8-abe5-698dac925ec5", "/home/user/dev-env"},
+		// Short test ID (13 chars)
+		{"test-session", "/home/user/provenance"},
+		// Medium ID (18 chars)
+		{"session-provenance", "/home/user/project"},
+	}
+
+	for _, s := range sessions {
+		session := &storage.Session{
+			ID:        s.id,
+			StartTime: now,
+			RepoPath:  s.repoPath,
+		}
+		if err := storage.CreateSession(db, session); err != nil {
+			t.Fatalf("Failed to create test session %s: %v", s.id, err)
+		}
+	}
+
+	output, err := runCLI(t, "session", "list")
+	if err != nil {
+		t.Fatalf("session list failed: %v", err)
+	}
+
+	lines := strings.Split(output, "\n")
+
+	// Find the header line and data lines
+	var headerLine string
+	var dataLines []string
+
+	for _, line := range lines {
+		if strings.Contains(line, "ID") && strings.Contains(line, "Start Time") {
+			headerLine = line
+		} else if strings.Contains(line, "jobqueue") || strings.Contains(line, "dev-env") ||
+		           strings.Contains(line, "test-session") || strings.Contains(line, "session-provenance") {
+			dataLines = append(dataLines, line)
+		}
+	}
+
+	if headerLine == "" {
+		t.Fatal("Header line not found in output")
+	}
+
+	if len(dataLines) != 4 {
+		t.Fatalf("Expected 4 data lines, got %d", len(dataLines))
+	}
+
+	// All session IDs should be truncated to 12 characters or less
+	// to ensure consistent column alignment
+	for i, line := range dataLines {
+		// Extract the ID (first column, should end at position 12)
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			t.Errorf("Line %d has no fields: %q", i, line)
+			continue
+		}
+
+		id := fields[0]
+		if len(id) > 12 {
+			t.Errorf("Line %d: Session ID %q is longer than 12 characters (len=%d), will cause misalignment",
+				i, id, len(id))
+		}
+
+		// Verify the original long UUID is truncated
+		if strings.HasPrefix(sessions[i].id, "780bed8d") && id != "780bed8d-9ae" {
+			t.Errorf("Line %d: Expected truncated UUID to be '780bed8d-9ae', got %q", i, id)
+		}
+	}
+
+	// Verify "Start Time" column appears at consistent position
+	// Find where "Start Time" starts in header
+	startTimePos := strings.Index(headerLine, "Start Time")
+	if startTimePos == -1 {
+		t.Fatal("'Start Time' not found in header")
+	}
+
+	// All data lines should have their second field (start time) at roughly the same position
+	// Allow some variance due to spacing, but it should be within a few characters
+	for i, line := range dataLines {
+		// Skip empty lines
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		// Find the timestamp pattern (YYYY-MM-DD HH:MM:SS)
+		timestampIdx := strings.Index(line, fmt.Sprintf("%d-", now.Year()))
+		if timestampIdx == -1 {
+			t.Errorf("Line %d: No timestamp found in line: %q", i, line)
+			continue
+		}
+
+		// Timestamp should be near the expected column position
+		// Allow 5 characters of variance
+		if abs(timestampIdx-startTimePos) > 5 {
+			t.Errorf("Line %d: Timestamp at position %d, expected near %d (diff=%d). Table is misaligned.\nLine: %q",
+				i, timestampIdx, startTimePos, abs(timestampIdx-startTimePos), line)
+		}
+	}
+}
+
+// abs returns the absolute value of x
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
