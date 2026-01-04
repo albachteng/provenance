@@ -996,8 +996,8 @@ func sessionList() {
 	}
 
 	// Print header
-	fmt.Printf("%-25s %-20s %-10s %-8s %-20s %s\n", "ID", "Start Time", "Duration", "Prompts", "Repo", "Status")
-	fmt.Println(strings.Repeat("-", 120))
+	fmt.Printf("%-12s %-20s %-10s %-8s %-20s %s\n", "ID", "Start Time", "Duration", "Prompts", "Repo", "Status")
+	fmt.Println(strings.Repeat("-", 100))
 
 	// Print sessions
 	for _, s := range sessions {
@@ -1023,8 +1023,14 @@ func sessionList() {
 			repoName = s.RepoPath
 		}
 
-		fmt.Printf("%-25s %-20s %-10s %-8d %-20s %s\n",
-			s.ID, startTime, duration, s.TotalPrompts, repoName, status)
+		// Truncate session ID to 12 characters for display
+		displayID := s.ID
+		if len(displayID) > 12 {
+			displayID = displayID[:12]
+		}
+
+		fmt.Printf("%-12s %-20s %-10s %-8d %-20s %s\n",
+			displayID, startTime, duration, s.TotalPrompts, repoName, status)
 	}
 
 	fmt.Printf("\nShowing %d session(s)\n", len(sessions))

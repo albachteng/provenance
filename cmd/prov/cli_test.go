@@ -378,7 +378,7 @@ func TestCLISessionListTableAlignment(t *testing.T) {
 		if strings.Contains(line, "ID") && strings.Contains(line, "Start Time") {
 			headerLine = line
 		} else if strings.Contains(line, "jobqueue") || strings.Contains(line, "dev-env") ||
-		           strings.Contains(line, "test-session") || strings.Contains(line, "session-provenance") {
+		           strings.Contains(line, "project") || (strings.Contains(line, "provenance") && !strings.Contains(line, "ID")) {
 			dataLines = append(dataLines, line)
 		}
 	}
@@ -393,6 +393,7 @@ func TestCLISessionListTableAlignment(t *testing.T) {
 
 	// All session IDs should be truncated to 12 characters or less
 	// to ensure consistent column alignment
+	foundTruncatedUUID := false
 	for i, line := range dataLines {
 		// Extract the ID (first column, should end at position 12)
 		fields := strings.Fields(line)
@@ -407,10 +408,14 @@ func TestCLISessionListTableAlignment(t *testing.T) {
 				i, id, len(id))
 		}
 
-		// Verify the original long UUID is truncated
-		if strings.HasPrefix(sessions[i].id, "780bed8d") && id != "780bed8d-9ae" {
-			t.Errorf("Line %d: Expected truncated UUID to be '780bed8d-9ae', got %q", i, id)
+		// Verify that long UUIDs are truncated (check for one example)
+		if id == "780bed8d-9ae" || id == "0fe4aa04-441" {
+			foundTruncatedUUID = true
 		}
+	}
+
+	if !foundTruncatedUUID {
+		t.Error("Expected to find at least one truncated UUID (e.g., '780bed8d-9ae' or '0fe4aa04-441')")
 	}
 
 	// Verify "Start Time" column appears at consistent position
