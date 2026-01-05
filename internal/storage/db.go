@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -66,20 +66,21 @@ func InitDatabase(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-// runMigrations applies database migrations using golang-migrate
+// runMigrations applies database migrations using golang-migrate with embedded migrations
 func runMigrations(db *sql.DB) error {
 	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	migrationsPath, err := findMigrationsPath()
+	sourceDriver, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
-		return fmt.Errorf("failed to find migrations directory: %w", err)
+		return fmt.Errorf("failed to create migration source: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		"file://"+migrationsPath,
+	m, err := migrate.NewWithInstance(
+		"iofs",
+		sourceDriver,
 		"sqlite3",
 		driver,
 	)
@@ -92,28 +93,4 @@ func runMigrations(db *sql.DB) error {
 	}
 
 	return nil
-}
-
-// findMigrationsPath locates the migrations directory
-// Searches relative to the current working directory and common locations
-func findMigrationsPath() (string, error) {
-	// Try common locations
-	paths := []string{
-		"migrations",
-		"./migrations",
-		"../../../migrations", // For tests running from internal/storage
-		"../../migrations",    // Alternative test path
-	}
-
-	for _, path := range paths {
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			continue
-		}
-		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
-			return absPath, nil
-		}
-	}
-
-	return "", fmt.Errorf("migrations directory not found")
 }
