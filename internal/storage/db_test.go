@@ -194,3 +194,43 @@ func contains(slice []string, item string) bool {
 	}
 	return false
 }
+
+// TestDatabaseInitFromAnyDirectory tests that database initialization
+// works regardless of current working directory (requires embedded migrations)
+func TestDatabaseInitFromAnyDirectory(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "provenance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	workDir, err := os.MkdirTemp("", "provenance-work-*")
+	if err != nil {
+		t.Fatalf("Failed to create work dir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current directory: %v", err)
+	}
+
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(originalDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	db, err := InitDatabase(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to initialize database from different directory: %v", err)
+	}
+	defer db.Close()
+
+	if !tableExists(t, db, "prompt_events") {
+		t.Error("Database tables not created - migrations likely didn't run")
+	}
+	if !tableExists(t, db, "sessions") {
+		t.Error("Sessions table not created - migrations likely didn't run")
+	}
+}
