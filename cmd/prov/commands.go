@@ -995,11 +995,9 @@ func sessionList() {
 		return
 	}
 
-	// Print header
 	fmt.Printf("%-12s %-20s %-10s %-8s %-20s %s\n", "ID", "Start Time", "Duration", "Prompts", "Repo", "Status")
 	fmt.Println(strings.Repeat("-", 100))
 
-	// Print sessions
 	for _, s := range sessions {
 		startTime := s.StartTime.Format("2006-01-02 15:04:05")
 
@@ -1017,13 +1015,11 @@ func sessionList() {
 			}
 		}
 
-		// Shorten repo path to just the last component
 		repoName := filepath.Base(s.RepoPath)
 		if repoName == "." || repoName == "/" {
 			repoName = s.RepoPath
 		}
 
-		// Truncate session ID to 12 characters for display
 		displayID := s.ID
 		if len(displayID) > 12 {
 			displayID = displayID[:12]

@@ -73,7 +73,6 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	// Create migration source from embedded filesystem
 	sourceDriver, err := iofs.New(migrationsFS, "migrations")
 	if err != nil {
 		return fmt.Errorf("failed to create migration source: %w", err)
