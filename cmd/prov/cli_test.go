@@ -343,8 +343,8 @@ func TestCLISessionListTableAlignment(t *testing.T) {
 	}{
 		{"780bed8d-9aeb-4303-87de-be31e39bfef9", "/home/user/jobqueue"}, // Long UUID (36 chars)
 		{"0fe4aa04-441b-4ca8-abe5-698dac925ec5", "/home/user/dev-env"},  // Long UUID (36 chars)
-		{"test-session", "/home/user/provenance"},                        // Short ID (13 chars)
-		{"session-provenance", "/home/user/project"},                     // Medium ID (18 chars)
+		{"test-session", "/home/user/provenance"},                       // Short ID (13 chars)
+		{"session-provenance", "/home/user/project"},                    // Medium ID (18 chars)
 	}
 
 	for _, s := range sessions {
