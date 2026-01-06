@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,7 +17,6 @@ import (
 
 var testBinary string
 
-// TestMain builds the CLI binary once for all tests
 func TestMain(m *testing.M) {
 	tmpDir, err := os.MkdirTemp("", "prov-test-binary-*")
 	if err != nil {
@@ -437,4 +437,657 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+func TestCLIStatsRepo(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(originalDir)
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session1 := &storage.Session{
+		ID:        "stats-session-1",
+		StartTime: now.Add(-1 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session1); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	events := []*storage.PromptEvent{
+		{
+			ID:             "stats-event-1",
+			Timestamp:      now.Add(-50 * time.Minute),
+			SessionID:      "stats-session-1",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Fix bug in auth",
+			ResponseText:   "Here's the fix...",
+			TokensIn:       100,
+			TokensOut:      300,
+			RepoPath:       repoPath,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"read_file", "write_file"},
+			FilesMentioned: []string{"src/auth.go", "src/db.go"},
+		},
+		{
+			ID:             "stats-event-2",
+			Timestamp:      now.Add(-30 * time.Minute),
+			SessionID:      "stats-session-1",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Add tests",
+			ResponseText:   "I'll add tests...",
+			TokensIn:       150,
+			TokensOut:      400,
+			RepoPath:       repoPath,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"write_file", "bash"},
+			FilesMentioned: []string{"src/auth.go"},
+		},
+	}
+
+	for _, event := range events {
+		if err := storage.StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "stats")
+	if err != nil {
+		t.Fatalf("stats command failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Total Prompts: 2") {
+		t.Errorf("Expected 'Total Prompts: 2', got: %s", output)
+	}
+
+	if !strings.Contains(output, "Tokens In: 250") {
+		t.Errorf("Expected 'Tokens In: 250', got: %s", output)
+	}
+
+	if !strings.Contains(output, "Tokens Out: 700") {
+		t.Errorf("Expected 'Tokens Out: 700', got: %s", output)
+	}
+
+	if !strings.Contains(output, "Sessions: 1") {
+		t.Errorf("Expected 'Sessions: 1', got: %s", output)
+	}
+
+	if !strings.Contains(output, "src/auth.go") {
+		t.Errorf("Expected file 'src/auth.go' in output, got: %s", output)
+	}
+
+	if !strings.Contains(output, "write_file") {
+		t.Errorf("Expected tool 'write_file' in output, got: %s", output)
+	}
+}
+
+func TestCLIStatsSession(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session := &storage.Session{
+		ID:        "stats-session-specific",
+		StartTime: now.Add(-1 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	events := []*storage.PromptEvent{
+		{
+			ID:             "session-event-1",
+			Timestamp:      now.Add(-50 * time.Minute),
+			SessionID:      "stats-session-specific",
+			Agent:          "claude-code",
+			PromptText:     "Implement feature",
+			TokensIn:       120,
+			TokensOut:      350,
+			RepoPath:       repoPath,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"read_file"},
+			FilesMentioned: []string{"src/feature.go"},
+		},
+	}
+
+	for _, event := range events {
+		if err := storage.StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "stats", "--session", "stats-session-specific")
+	if err != nil {
+		t.Fatalf("stats --session command failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Session: stats-session-specific") {
+		t.Errorf("Expected session ID in output, got: %s", output)
+	}
+
+	if !strings.Contains(output, "Total Prompts: 1") {
+		t.Errorf("Expected 'Total Prompts: 1', got: %s", output)
+	}
+
+	if !strings.Contains(output, "Tokens In: 120") {
+		t.Errorf("Expected 'Tokens In: 120', got: %s", output)
+	}
+
+	if !strings.Contains(output, "src/feature.go") {
+		t.Errorf("Expected file 'src/feature.go' in output, got: %s", output)
+	}
+}
+
+func TestCLIStatsSince(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(originalDir)
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session := &storage.Session{
+		ID:        "stats-timeframe-session",
+		StartTime: now.Add(-10 * 24 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	events := []*storage.PromptEvent{
+		{
+			ID:             "old-event",
+			Timestamp:      now.Add(-9 * 24 * time.Hour),
+			SessionID:      "stats-timeframe-session",
+			Agent:          "claude-code",
+			PromptText:     "Old event",
+			TokensIn:       50,
+			TokensOut:      100,
+			RepoPath:       repoPath,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"read_file"},
+			FilesMentioned: []string{"old.go"},
+		},
+		{
+			ID:             "recent-event",
+			Timestamp:      now.Add(-3 * 24 * time.Hour),
+			SessionID:      "stats-timeframe-session",
+			Agent:          "claude-code",
+			PromptText:     "Recent event",
+			TokensIn:       100,
+			TokensOut:      200,
+			RepoPath:       repoPath,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"write_file"},
+			FilesMentioned: []string{"recent.go"},
+		},
+	}
+
+	for _, event := range events {
+		if err := storage.StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "stats", "--since", "7 days ago")
+	if err != nil {
+		t.Fatalf("stats --since command failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Total Prompts: 1") {
+		t.Errorf("Expected 'Total Prompts: 1' (only recent event), got: %s", output)
+	}
+
+	if !strings.Contains(output, "Tokens In: 100") {
+		t.Errorf("Expected 'Tokens In: 100', got: %s", output)
+	}
+
+	if !strings.Contains(output, "recent.go") {
+		t.Errorf("Expected file 'recent.go' in output, got: %s", output)
+	}
+
+	if strings.Contains(output, "old.go") {
+		t.Errorf("Did not expect 'old.go' in recent stats, got: %s", output)
+	}
+}
+
+func TestCLIStatsNoData(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer os.Chdir(originalDir)
+
+	output, err := runCLI(t, "stats")
+	if err != nil {
+		t.Fatalf("stats command failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Total Prompts: 0") && !strings.Contains(output, "No prompts") {
+		t.Errorf("Expected empty stats message, got: %s", output)
+	}
+}
+
+func TestCLIExportJSON(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session := &storage.Session{
+		ID:        "export-session-1",
+		StartTime: now.Add(-1 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	events := []*storage.PromptEvent{
+		{
+			ID:             "export-event-1",
+			Timestamp:      now.Add(-50 * time.Minute),
+			SessionID:      "export-session-1",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Implement feature X",
+			ResponseText:   "Here's the implementation...",
+			TokensIn:       100,
+			TokensOut:      300,
+			RepoPath:       repoPath,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"read_file", "write_file"},
+			FilesMentioned: []string{"src/feature.go"},
+		},
+		{
+			ID:             "export-event-2",
+			Timestamp:      now.Add(-30 * time.Minute),
+			SessionID:      "export-session-1",
+			Agent:          "claude-code",
+			ModelVersion:   "sonnet-4.5",
+			PromptText:     "Add tests",
+			ResponseText:   "I'll add tests...",
+			TokensIn:       80,
+			TokensOut:      250,
+			RepoPath:       repoPath,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"write_file"},
+			FilesMentioned: []string{"src/feature_test.go"},
+		},
+	}
+
+	for _, event := range events {
+		if err := storage.StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "export", "--format", "json")
+	if err != nil {
+		t.Fatalf("export command failed: %v", err)
+	}
+
+	var exported []map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &exported); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	if len(exported) != 2 {
+		t.Errorf("Expected 2 exported events, got %d", len(exported))
+	}
+
+	if exported[0]["id"] != "export-event-1" && exported[0]["id"] != "export-event-2" {
+		t.Errorf("Expected event IDs to be export-event-1 or export-event-2, got %v", exported[0]["id"])
+	}
+
+	if exported[0]["prompt_text"] == nil {
+		t.Error("Expected prompt_text field in exported JSON")
+	}
+
+	if exported[0]["tokens_in"] == nil {
+		t.Error("Expected tokens_in field in exported JSON")
+	}
+}
+
+func TestCLIExportCSV(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session := &storage.Session{
+		ID:        "export-csv-session",
+		StartTime: now.Add(-1 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	event := &storage.PromptEvent{
+		ID:             "export-csv-event",
+		Timestamp:      now.Add(-30 * time.Minute),
+		SessionID:      "export-csv-session",
+		Agent:          "claude-code",
+		ModelVersion:   "sonnet-4.5",
+		PromptText:     "Fix bug",
+		ResponseText:   "Fixed!",
+		TokensIn:       50,
+		TokensOut:      100,
+		RepoPath:       repoPath,
+		Author:         "testuser",
+		ToolsInvoked:   []string{"edit_file"},
+		FilesMentioned: []string{"src/bug.go"},
+	}
+
+	if err := storage.StorePromptEvent(db, event); err != nil {
+		t.Fatalf("Failed to store event: %v", err)
+	}
+
+	output, err := runCLI(t, "export", "--format", "csv")
+	if err != nil {
+		t.Fatalf("export --format csv command failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("Expected at least 2 lines (header + data), got %d", len(lines))
+	}
+
+	header := lines[0]
+	if !strings.Contains(header, "id") || !strings.Contains(header, "timestamp") || !strings.Contains(header, "prompt_text") {
+		t.Errorf("CSV header missing expected columns, got: %s", header)
+	}
+
+	dataLine := lines[1]
+	if !strings.Contains(dataLine, "export-csv-event") {
+		t.Errorf("Expected event ID in CSV data, got: %s", dataLine)
+	}
+
+	if !strings.Contains(dataLine, "claude-code") {
+		t.Errorf("Expected agent name in CSV data, got: %s", dataLine)
+	}
+}
+
+func TestCLIExportSession(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session1 := &storage.Session{
+		ID:        "export-specific-session",
+		StartTime: now.Add(-2 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	session2 := &storage.Session{
+		ID:        "export-other-session",
+		StartTime: now.Add(-3 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session1); err != nil {
+		t.Fatalf("Failed to create session1: %v", err)
+	}
+	if err := storage.CreateSession(db, session2); err != nil {
+		t.Fatalf("Failed to create session2: %v", err)
+	}
+
+	events := []*storage.PromptEvent{
+		{
+			ID:           "event-in-target-session",
+			Timestamp:    now.Add(-100 * time.Minute),
+			SessionID:    "export-specific-session",
+			Agent:        "claude-code",
+			PromptText:   "Target session event",
+			TokensIn:     100,
+			TokensOut:    200,
+			RepoPath:     repoPath,
+			Author:       "testuser",
+			ToolsInvoked: []string{"read"},
+		},
+		{
+			ID:           "event-in-other-session",
+			Timestamp:    now.Add(-150 * time.Minute),
+			SessionID:    "export-other-session",
+			Agent:        "claude-code",
+			PromptText:   "Other session event",
+			TokensIn:     50,
+			TokensOut:    100,
+			RepoPath:     repoPath,
+			Author:       "testuser",
+			ToolsInvoked: []string{"write"},
+		},
+	}
+
+	for _, event := range events {
+		if err := storage.StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "export", "--session", "export-specific-session", "--format", "json")
+	if err != nil {
+		t.Fatalf("export --session command failed: %v", err)
+	}
+
+	var exported []map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &exported); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	if len(exported) != 1 {
+		t.Errorf("Expected 1 exported event (only from target session), got %d", len(exported))
+	}
+
+	if exported[0]["id"] != "event-in-target-session" {
+		t.Errorf("Expected event-in-target-session, got %v", exported[0]["id"])
+	}
+
+	if strings.Contains(output, "event-in-other-session") {
+		t.Error("Should not export events from other sessions")
+	}
+}
+
+func TestCLIExportSince(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session := &storage.Session{
+		ID:        "export-timeframe-session",
+		StartTime: now.Add(-10 * 24 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	events := []*storage.PromptEvent{
+		{
+			ID:           "old-event-export",
+			Timestamp:    now.Add(-9 * 24 * time.Hour),
+			SessionID:    "export-timeframe-session",
+			Agent:        "claude-code",
+			PromptText:   "Old event",
+			TokensIn:     50,
+			TokensOut:    100,
+			RepoPath:     repoPath,
+			Author:       "testuser",
+			ToolsInvoked: []string{"read"},
+		},
+		{
+			ID:           "recent-event-export",
+			Timestamp:    now.Add(-3 * 24 * time.Hour),
+			SessionID:    "export-timeframe-session",
+			Agent:        "claude-code",
+			PromptText:   "Recent event",
+			TokensIn:     100,
+			TokensOut:    200,
+			RepoPath:     repoPath,
+			Author:       "testuser",
+			ToolsInvoked: []string{"write"},
+		},
+	}
+
+	for _, event := range events {
+		if err := storage.StorePromptEvent(db, event); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "export", "--since", "7 days ago", "--format", "json")
+	if err != nil {
+		t.Fatalf("export --since command failed: %v", err)
+	}
+
+	var exported []map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &exported); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	if len(exported) != 1 {
+		t.Errorf("Expected 1 recent event, got %d", len(exported))
+	}
+
+	if exported[0]["id"] != "recent-event-export" {
+		t.Errorf("Expected recent-event-export, got %v", exported[0]["id"])
+	}
+
+	if strings.Contains(output, "old-event-export") {
+		t.Error("Should not export events older than 7 days")
+	}
+}
+
+func TestCLIExportToFile(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	repoPath := tmpDir
+	now := time.Now()
+
+	session := &storage.Session{
+		ID:        "export-file-session",
+		StartTime: now.Add(-1 * time.Hour),
+		RepoPath:  repoPath,
+	}
+	if err := storage.CreateSession(db, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	event := &storage.PromptEvent{
+		ID:           "export-file-event",
+		Timestamp:    now.Add(-30 * time.Minute),
+		SessionID:    "export-file-session",
+		Agent:        "claude-code",
+		PromptText:   "Test export to file",
+		TokensIn:     75,
+		TokensOut:    150,
+		RepoPath:     repoPath,
+		Author:       "testuser",
+		ToolsInvoked: []string{"bash"},
+	}
+
+	if err := storage.StorePromptEvent(db, event); err != nil {
+		t.Fatalf("Failed to store event: %v", err)
+	}
+
+	outputFile := filepath.Join(tmpDir, "export.json")
+
+	output, err := runCLI(t, "export", "--format", "json", "--output", outputFile)
+	if err != nil {
+		t.Fatalf("export --output command failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Exported") || !strings.Contains(output, outputFile) {
+		t.Errorf("Expected success message with file path, got: %s", output)
+	}
+
+	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
+		t.Fatalf("Output file was not created: %s", outputFile)
+	}
+
+	fileContent, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	var exported []map[string]interface{}
+	if err := json.Unmarshal(fileContent, &exported); err != nil {
+		t.Fatalf("Failed to parse JSON from file: %v", err)
+	}
+
+	if len(exported) != 1 {
+		t.Errorf("Expected 1 event in file, got %d", len(exported))
+	}
+
+	if exported[0]["id"] != "export-file-event" {
+		t.Errorf("Expected export-file-event in file, got %v", exported[0]["id"])
+	}
+}
+
+func TestCLIExportNoData(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close()
+
+	output, err := runCLI(t, "export", "--format", "json")
+	if err != nil {
+		t.Fatalf("export command with no data failed: %v", err)
+	}
+
+	var exported []map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &exported); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	if len(exported) != 0 {
+		t.Errorf("Expected empty array for no data, got %d events", len(exported))
+	}
 }
