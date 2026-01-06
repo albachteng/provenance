@@ -692,7 +692,7 @@ prov session end <id>                # Manually end a session
 
 ---
 
-#### Feature 2: Basic Statistics Commands ✅ COMPLETE
+#### Feature 2: Basic Statistics Commands ✅
 **Goal**: Aggregate usage metrics
 
 **Storage layer implementation** (COMPLETE):
@@ -705,13 +705,6 @@ func GetSessionStats(db *sql.DB, sessionID string) (*SessionStats, error)
 
 // Time-filtered statistics
 func GetTimeframeStats(db *sql.DB, repoPath string, since time.Time) (*RepoStats, error)
-```
-
-**CLI implementation** (COMPLETE):
-```bash
-prov stats                    # Repository-level statistics
-prov stats --session <id>     # Session-specific statistics
-prov stats --since "7 days ago"  # Time-filtered statistics
 ```
 
 **RepoStats includes:**
@@ -731,17 +724,11 @@ prov stats --since "7 days ago"  # Time-filtered statistics
 - JSON array unpacking for file/tool aggregation
 - Time-based filtering
 
-**CLI work:** ✅
-- Command routing and flag parsing
-- Time string parsing ("7 days ago", "2 weeks ago", etc.)
-- Formatted output with top 10 files and tools
-- Integration tests (4/4 tests passing)
-
 **Value**: Foundation for analytics CLI - provides queryable metrics about AI tool usage
 
 **Estimated complexity**: Low-Medium (SQL aggregations + JSON parsing)
 
-**Status**: Complete - Storage layer + CLI commands fully implemented with comprehensive test coverage (9 test functions, all passing)
+**Status**: Storage layer complete with comprehensive test coverage (5 test functions, all passing)
 
 ---
 
@@ -840,14 +827,14 @@ prov untag <prompt-id> <commit>      # Remove association
 ### Overall Success Criteria
 - [x] Phase broken into 6 independent features
 - [x] Feature 1: Session queries (1-2 hours) - COMPLETE
-- [x] Feature 2: Basic statistics commands (2-3 hours) - COMPLETE
+- [x] Feature 2: Basic stats storage layer (2-3 hours) - COMPLETE
 - [ ] Feature 3: Export (2-4 hours)
 - [ ] Feature 4: Git correlation (6-8 hours)
 - [ ] Feature 5: Blame commands (2-3 hours)
 - [ ] Feature 6: Manual tagging (1-2 hours)
 
 **Total estimated time**: 14-22 hours across 6 features
-**Completed**: 5-7 hours (Features 1-2)
+**Completed**: 3-5 hours (Features 1-2)
 
 ---
 

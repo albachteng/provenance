@@ -50,8 +50,6 @@ func main() {
 		cmdSearch()
 	case "session":
 		cmdSession()
-	case "stats":
-		cmdStats()
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -79,9 +77,6 @@ func printUsage() {
 	fmt.Println("  session list --active List active sessions")
 	fmt.Println("  session show <id>    Show session details")
 	fmt.Println("  session end <id>     Manually end a session")
-	fmt.Println("  stats                Show repository statistics")
-	fmt.Println("  stats --session <id> Show session-specific statistics")
-	fmt.Println("  stats --since <time> Show statistics since a time period")
 	fmt.Println("  list                 List recent prompts")
 	fmt.Println("  show <id>            Show prompt details")
 	fmt.Println("  search <query>       Search prompts")
