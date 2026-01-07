@@ -52,6 +52,8 @@ func main() {
 		cmdSession()
 	case "stats":
 		cmdStats()
+	case "export":
+		cmdExport()
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -82,6 +84,11 @@ func printUsage() {
 	fmt.Println("  stats                Show repository statistics")
 	fmt.Println("  stats --session <id> Show session-specific statistics")
 	fmt.Println("  stats --since <time> Show statistics since a time period")
+	fmt.Println("  export --format json Export data as JSON")
+	fmt.Println("  export --format csv  Export data as CSV")
+	fmt.Println("  export --session <id> Export specific session")
+	fmt.Println("  export --since <time> Export data since a time period")
+	fmt.Println("  export --output <file> Write export to file")
 	fmt.Println("  list                 List recent prompts")
 	fmt.Println("  show <id>            Show prompt details")
 	fmt.Println("  search <query>       Search prompts")

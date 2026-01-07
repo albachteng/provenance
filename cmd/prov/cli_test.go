@@ -775,16 +775,16 @@ func TestCLIExportJSON(t *testing.T) {
 		t.Errorf("Expected 2 exported events, got %d", len(exported))
 	}
 
-	if exported[0]["id"] != "export-event-1" && exported[0]["id"] != "export-event-2" {
-		t.Errorf("Expected event IDs to be export-event-1 or export-event-2, got %v", exported[0]["id"])
+	if exported[0]["ID"] != "export-event-1" && exported[0]["ID"] != "export-event-2" {
+		t.Errorf("Expected event IDs to be export-event-1 or export-event-2, got %v", exported[0]["ID"])
 	}
 
-	if exported[0]["prompt_text"] == nil {
-		t.Error("Expected prompt_text field in exported JSON")
+	if exported[0]["PromptText"] == nil {
+		t.Error("Expected PromptText field in exported JSON")
 	}
 
-	if exported[0]["tokens_in"] == nil {
-		t.Error("Expected tokens_in field in exported JSON")
+	if exported[0]["TokensIn"] == nil {
+		t.Error("Expected TokensIn field in exported JSON")
 	}
 }
 
@@ -922,8 +922,8 @@ func TestCLIExportSession(t *testing.T) {
 		t.Errorf("Expected 1 exported event (only from target session), got %d", len(exported))
 	}
 
-	if exported[0]["id"] != "event-in-target-session" {
-		t.Errorf("Expected event-in-target-session, got %v", exported[0]["id"])
+	if exported[0]["ID"] != "event-in-target-session" {
+		t.Errorf("Expected event-in-target-session, got %v", exported[0]["ID"])
 	}
 
 	if strings.Contains(output, "event-in-other-session") {
@@ -995,8 +995,8 @@ func TestCLIExportSince(t *testing.T) {
 		t.Errorf("Expected 1 recent event, got %d", len(exported))
 	}
 
-	if exported[0]["id"] != "recent-event-export" {
-		t.Errorf("Expected recent-event-export, got %v", exported[0]["id"])
+	if exported[0]["ID"] != "recent-event-export" {
+		t.Errorf("Expected recent-event-export, got %v", exported[0]["ID"])
 	}
 
 	if strings.Contains(output, "old-event-export") {
@@ -1067,8 +1067,8 @@ func TestCLIExportToFile(t *testing.T) {
 		t.Errorf("Expected 1 event in file, got %d", len(exported))
 	}
 
-	if exported[0]["id"] != "export-file-event" {
-		t.Errorf("Expected export-file-event in file, got %v", exported[0]["id"])
+	if exported[0]["ID"] != "export-file-event" {
+		t.Errorf("Expected export-file-event in file, got %v", exported[0]["ID"])
 	}
 }
 
