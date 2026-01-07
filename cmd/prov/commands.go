@@ -1526,10 +1526,10 @@ func scanPromptEvents(rows *sql.Rows) ([]*storage.PromptEvent, error) {
 			e.PromptType = promptType
 		}
 
-		json.Unmarshal([]byte(dirtyFilesJSON), &e.DirtyFiles)           //nolint:errcheck
-		json.Unmarshal([]byte(workspaceFilesJSON), &e.WorkspaceFiles)   //nolint:errcheck
-		json.Unmarshal([]byte(toolsInvokedJSON), &e.ToolsInvoked)       //nolint:errcheck
-		json.Unmarshal([]byte(filesMentionedJSON), &e.FilesMentioned)   //nolint:errcheck
+		json.Unmarshal([]byte(dirtyFilesJSON), &e.DirtyFiles)         //nolint:errcheck
+		json.Unmarshal([]byte(workspaceFilesJSON), &e.WorkspaceFiles) //nolint:errcheck
+		json.Unmarshal([]byte(toolsInvokedJSON), &e.ToolsInvoked)     //nolint:errcheck
+		json.Unmarshal([]byte(filesMentionedJSON), &e.FilesMentioned) //nolint:errcheck
 
 		events = append(events, &e)
 	}
