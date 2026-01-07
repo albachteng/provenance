@@ -1173,7 +1173,7 @@ func statsRepo() {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath, err := findGitRoot()
 	if err != nil {
@@ -1197,7 +1197,7 @@ func statsSession(sessionID string) {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	stats, err := storage.GetSessionStats(db, sessionID)
 	if err != nil {
@@ -1220,7 +1220,7 @@ func statsSince(sinceStr string) {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath, err := findGitRoot()
 	if err != nil {
@@ -1383,7 +1383,7 @@ func cmdExport() {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	var events []*storage.PromptEvent
 
@@ -1526,10 +1526,10 @@ func scanPromptEvents(rows *sql.Rows) ([]*storage.PromptEvent, error) {
 			e.PromptType = promptType
 		}
 
-		json.Unmarshal([]byte(dirtyFilesJSON), &e.DirtyFiles)
-		json.Unmarshal([]byte(workspaceFilesJSON), &e.WorkspaceFiles)
-		json.Unmarshal([]byte(toolsInvokedJSON), &e.ToolsInvoked)
-		json.Unmarshal([]byte(filesMentionedJSON), &e.FilesMentioned)
+		json.Unmarshal([]byte(dirtyFilesJSON), &e.DirtyFiles)           //nolint:errcheck
+		json.Unmarshal([]byte(workspaceFilesJSON), &e.WorkspaceFiles)   //nolint:errcheck
+		json.Unmarshal([]byte(toolsInvokedJSON), &e.ToolsInvoked)       //nolint:errcheck
+		json.Unmarshal([]byte(filesMentionedJSON), &e.FilesMentioned)   //nolint:errcheck
 
 		events = append(events, &e)
 	}
