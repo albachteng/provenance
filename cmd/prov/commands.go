@@ -1449,7 +1449,7 @@ func exportAllEvents(db *sql.DB) ([]*storage.PromptEvent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query events: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	return scanPromptEvents(rows)
 }
@@ -1469,7 +1469,7 @@ func exportEventsSince(db *sql.DB, since time.Time) ([]*storage.PromptEvent, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to query events: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	return scanPromptEvents(rows)
 }
