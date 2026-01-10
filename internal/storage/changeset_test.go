@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -12,7 +10,18 @@ func TestCreateChangeSet(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	// Create a prompt event first (foreign key requirement)
+	// Create a session first (foreign key requirement)
+	session := &Session{
+		ID:        "session-123",
+		StartTime: time.Now(),
+		RepoPath:  "/test/repo",
+	}
+	err := CreateSession(db, session)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Create a prompt event (foreign key requirement)
 	event := &PromptEvent{
 		ID:         "evt-test-123",
 		Timestamp:  time.Now(),
@@ -23,7 +32,7 @@ func TestCreateChangeSet(t *testing.T) {
 		Author:     "testuser",
 	}
 
-	err := StorePromptEvent(db, event)
+	err = StorePromptEvent(db, event)
 	if err != nil {
 		t.Fatalf("Failed to store prompt event: %v", err)
 	}
@@ -32,6 +41,7 @@ func TestCreateChangeSet(t *testing.T) {
 	changeSet := &ChangeSet{
 		ID:                   "cs-test-1",
 		PromptID:             "evt-test-123",
+		SessionID:            "session-123",
 		Timestamp:            time.Now(),
 		FilesChanged:         []string{"auth.go", "auth_test.go"},
 		DiffSummary:          "+150 -20",
@@ -78,6 +88,17 @@ func TestGetChangeSetsForPrompt(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
+	// Create a session first
+	session := &Session{
+		ID:        "session-123",
+		StartTime: time.Now(),
+		RepoPath:  "/test/repo",
+	}
+	err := CreateSession(db, session)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
 	// Create a prompt event
 	event := &PromptEvent{
 		ID:         "evt-multi-123",
@@ -89,7 +110,7 @@ func TestGetChangeSetsForPrompt(t *testing.T) {
 		Author:     "testuser",
 	}
 
-	err := StorePromptEvent(db, event)
+	err = StorePromptEvent(db, event)
 	if err != nil {
 		t.Fatalf("Failed to store prompt event: %v", err)
 	}
@@ -99,6 +120,7 @@ func TestGetChangeSetsForPrompt(t *testing.T) {
 		{
 			ID:                "cs-1",
 			PromptID:          "evt-multi-123",
+			SessionID:         "session-123",
 			Timestamp:         time.Now(),
 			FilesChanged:      []string{"auth.go"},
 			CommitIntroduced:  "commit1",
@@ -108,6 +130,7 @@ func TestGetChangeSetsForPrompt(t *testing.T) {
 		{
 			ID:                "cs-2",
 			PromptID:          "evt-multi-123",
+			SessionID:         "session-123",
 			Timestamp:         time.Now().Add(5 * time.Minute),
 			FilesChanged:      []string{"auth_test.go"},
 			CommitIntroduced:  "commit2",
@@ -148,6 +171,17 @@ func TestGetChangeSetsForCommit(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
+	// Create a session first
+	session := &Session{
+		ID:        "session-123",
+		StartTime: time.Now(),
+		RepoPath:  "/test/repo",
+	}
+	err := CreateSession(db, session)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
 	// Create multiple prompt events
 	events := []*PromptEvent{
 		{
@@ -182,6 +216,7 @@ func TestGetChangeSetsForCommit(t *testing.T) {
 		{
 			ID:                "cs-commit-1",
 			PromptID:          "evt-1",
+			SessionID:         "session-123",
 			Timestamp:         time.Now(),
 			FilesChanged:      []string{"feature_a.go"},
 			CommitIntroduced:  "shared-commit-123",
@@ -191,6 +226,7 @@ func TestGetChangeSetsForCommit(t *testing.T) {
 		{
 			ID:                "cs-commit-2",
 			PromptID:          "evt-2",
+			SessionID:         "session-123",
 			Timestamp:         time.Now(),
 			FilesChanged:      []string{"feature_b.go"},
 			CommitIntroduced:  "shared-commit-123",
@@ -246,6 +282,7 @@ func TestChangeSetForeignKeyConstraint(t *testing.T) {
 	changeSet := &ChangeSet{
 		ID:                "cs-invalid",
 		PromptID:          "nonexistent-prompt",
+		SessionID:         "nonexistent-session",
 		Timestamp:         time.Now(),
 		FilesChanged:      []string{"test.go"},
 		CommitIntroduced:  "abc123",
@@ -280,7 +317,18 @@ func TestChangeSetFilesChangedJSON(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	// Create prompt first
+	// Create session first
+	session := &Session{
+		ID:        "session-123",
+		StartTime: time.Now(),
+		RepoPath:  "/test/repo",
+	}
+	err := CreateSession(db, session)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Create prompt
 	event := &PromptEvent{
 		ID:         "evt-json-test",
 		Timestamp:  time.Now(),
@@ -291,7 +339,7 @@ func TestChangeSetFilesChangedJSON(t *testing.T) {
 		Author:     "testuser",
 	}
 
-	err := StorePromptEvent(db, event)
+	err = StorePromptEvent(db, event)
 	if err != nil {
 		t.Fatalf("Failed to store prompt event: %v", err)
 	}
@@ -307,6 +355,7 @@ func TestChangeSetFilesChangedJSON(t *testing.T) {
 	changeSet := &ChangeSet{
 		ID:                "cs-json",
 		PromptID:          "evt-json-test",
+		SessionID:         "session-123",
 		Timestamp:         time.Now(),
 		FilesChanged:      files,
 		CommitIntroduced:  "abc123",

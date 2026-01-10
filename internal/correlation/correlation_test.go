@@ -227,15 +227,25 @@ func TestFindRelevantPrompts(t *testing.T) {
 
 	now := time.Now()
 
-	// Create a session
-	session := &storage.Session{
+	// Create sessions for both test repo and different repo
+	session1 := &storage.Session{
 		ID:        "session-123",
 		StartTime: now.Add(-20 * time.Minute),
 		RepoPath:  "/test/repo",
 	}
-	err := storage.CreateSession(db, session)
+	err := storage.CreateSession(db, session1)
 	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
+		t.Fatalf("Failed to create session 1: %v", err)
+	}
+
+	session2 := &storage.Session{
+		ID:        "session-456",
+		StartTime: now.Add(-5 * time.Minute),
+		RepoPath:  "/other/repo",
+	}
+	err = storage.CreateSession(db, session2)
+	if err != nil {
+		t.Fatalf("Failed to create session 2: %v", err)
 	}
 
 	// Create prompts at different times
@@ -311,7 +321,7 @@ func TestCorrelateCommitToPrompts(t *testing.T) {
 
 	now := time.Now()
 
-	// Create session and prompts
+	// Create session
 	session := &storage.Session{
 		ID:        "session-123",
 		StartTime: now.Add(-10 * time.Minute),
@@ -321,6 +331,9 @@ func TestCorrelateCommitToPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
+
+	// Create prompts
+
 
 	prompts := []*storage.PromptEvent{
 		{
