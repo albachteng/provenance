@@ -483,7 +483,6 @@ func sendEventToDaemon(agent, promptText string) {
 		gitDirty = gitInfo.IsDirty
 	}
 
-	// Get current directory as repo path, fallback to "unknown" if unavailable
 	repoPath, err := os.Getwd()
 	if err != nil {
 		repoPath = "unknown"
@@ -495,7 +494,6 @@ func sendEventToDaemon(agent, promptText string) {
 	}
 
 	// Get or create a session for this repo
-	// For now, use a simple session per repo (TODO: proper session management)
 	sessionID := fmt.Sprintf("session-%s", filepath.Base(repoPath))
 
 	// Send session start event first (on separate connection - daemon reads one message per connection)
@@ -964,7 +962,6 @@ func cmdSession() {
 }
 
 func sessionList() {
-	// Check for --active flag
 	activeOnly := false
 	for _, arg := range os.Args[3:] {
 		if arg == "--active" {
@@ -1050,7 +1047,6 @@ func sessionShow(sessionID string) {
 		os.Exit(1)
 	}
 
-	// Print session details
 	fmt.Printf("Session ID: %s\n", session.ID)
 	fmt.Printf("Repository: %s\n", session.RepoPath)
 	fmt.Printf("Start Time: %s\n", session.StartTime.Format("2006-01-02 15:04:05"))
@@ -1069,7 +1065,6 @@ func sessionShow(sessionID string) {
 	fmt.Printf("Total Tokens: %d\n", session.TotalTokens)
 	fmt.Println()
 
-	// List all prompts in this session
 	events, err := storage.ListPromptEvents(db, sessionID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to list prompts: %v\n", err)
@@ -1104,7 +1099,6 @@ func sessionEnd(sessionID string) {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Check if session exists and is active
 	session, err := storage.GetSession(db, sessionID)
 	if err != nil {
 		if err == storage.ErrNotFound {
@@ -1120,7 +1114,6 @@ func sessionEnd(sessionID string) {
 		os.Exit(1)
 	}
 
-	// End the session
 	if err := storage.EndSession(db, sessionID, time.Now(), "manual"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to end session: %v\n", err)
 		os.Exit(1)
@@ -1180,7 +1173,7 @@ func statsRepo() {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath, err := findGitRoot()
 	if err != nil {
@@ -1204,7 +1197,7 @@ func statsSession(sessionID string) {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	stats, err := storage.GetSessionStats(db, sessionID)
 	if err != nil {
@@ -1227,7 +1220,7 @@ func statsSince(sinceStr string) {
 		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath, err := findGitRoot()
 	if err != nil {
@@ -1272,7 +1265,6 @@ func displayStats(title string, prompts, tokensIn, tokensOut, sessions int,
 		for path, count := range files {
 			fileStats = append(fileStats, fileStat{path, count})
 		}
-		// Sort by count descending
 		for i := 0; i < len(fileStats); i++ {
 			for j := i + 1; j < len(fileStats); j++ {
 				if fileStats[j].count > fileStats[i].count {
@@ -1300,7 +1292,6 @@ func displayStats(title string, prompts, tokensIn, tokensOut, sessions int,
 		for name, count := range tools {
 			toolStats = append(toolStats, toolStat{name, count})
 		}
-		// Sort by count descending
 		for i := 0; i < len(toolStats); i++ {
 			for j := i + 1; j < len(toolStats); j++ {
 				if toolStats[j].count > toolStats[i].count {
@@ -1354,4 +1345,248 @@ func parseTimeString(timeStr string) (time.Time, error) {
 	}
 
 	return time.Time{}, fmt.Errorf("invalid time format: %s (expected format like '7 days ago')", timeStr)
+}
+
+func cmdExport() {
+	var format string
+	var sessionID string
+	var sinceStr string
+	var outputPath string
+
+	for i := 2; i < len(os.Args); i++ {
+		if os.Args[i] == "--format" && i+1 < len(os.Args) {
+			format = os.Args[i+1]
+			i++
+		} else if os.Args[i] == "--session" && i+1 < len(os.Args) {
+			sessionID = os.Args[i+1]
+			i++
+		} else if os.Args[i] == "--since" && i+1 < len(os.Args) {
+			sinceStr = os.Args[i+1]
+			i++
+		} else if os.Args[i] == "--output" && i+1 < len(os.Args) {
+			outputPath = os.Args[i+1]
+			i++
+		}
+	}
+
+	if format == "" {
+		format = "json"
+	}
+
+	if format != "json" && format != "csv" {
+		fmt.Fprintf(os.Stderr, "Invalid format: %s (must be 'json' or 'csv')\n", format)
+		os.Exit(1)
+	}
+
+	db, err := openDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close() //nolint:errcheck
+
+	var events []*storage.PromptEvent
+
+	if sessionID != "" {
+		events, err = storage.ListPromptEvents(db, sessionID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to list events for session: %v\n", err)
+			os.Exit(1)
+		}
+	} else if sinceStr != "" {
+		since, err := parseTimeString(sinceStr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to parse time: %v\n", err)
+			os.Exit(1)
+		}
+		events, err = exportEventsSince(db, since)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to export events: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		events, err = exportAllEvents(db)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to export events: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	var output []byte
+	if format == "json" {
+		output, err = exportJSON(events)
+	} else {
+		output, err = exportCSV(events)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to export data: %v\n", err)
+		os.Exit(1)
+	}
+
+	if outputPath != "" {
+		if err := os.WriteFile(outputPath, output, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write output file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Exported %d events to %s\n", len(events), outputPath)
+	} else {
+		fmt.Print(string(output))
+	}
+}
+
+func exportAllEvents(db *sql.DB) ([]*storage.PromptEvent, error) {
+	query := `
+		SELECT id, timestamp, session_id, agent, model_version, prompt_text, response_text,
+		       tokens_in, tokens_out, latency_ms, repo_path, git_commit, git_branch, git_dirty,
+		       dirty_files, author, ide, active_file, workspace_files, prompt_type,
+		       tools_invoked, files_mentioned
+		FROM prompt_events
+		ORDER BY timestamp DESC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return scanPromptEvents(rows)
+}
+
+func exportEventsSince(db *sql.DB, since time.Time) ([]*storage.PromptEvent, error) {
+	query := `
+		SELECT id, timestamp, session_id, agent, model_version, prompt_text, response_text,
+		       tokens_in, tokens_out, latency_ms, repo_path, git_commit, git_branch, git_dirty,
+		       dirty_files, author, ide, active_file, workspace_files, prompt_type,
+		       tools_invoked, files_mentioned
+		FROM prompt_events
+		WHERE timestamp >= ?
+		ORDER BY timestamp DESC
+	`
+
+	rows, err := db.Query(query, since.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return scanPromptEvents(rows)
+}
+
+func scanPromptEvents(rows *sql.Rows) ([]*storage.PromptEvent, error) {
+	var events []*storage.PromptEvent
+
+	for rows.Next() {
+		var e storage.PromptEvent
+		var timestampUnix int64
+		var modelVersion, responseText, gitCommit, gitBranch, ide, activeFile sql.NullString
+		var latencyMs sql.NullInt64
+		var gitDirty sql.NullBool
+		var dirtyFilesJSON, workspaceFilesJSON, promptType, toolsInvokedJSON, filesMentionedJSON string
+
+		err := rows.Scan(
+			&e.ID, &timestampUnix, &e.SessionID, &e.Agent, &modelVersion,
+			&e.PromptText, &responseText, &e.TokensIn, &e.TokensOut, &latencyMs,
+			&e.RepoPath, &gitCommit, &gitBranch, &gitDirty, &dirtyFilesJSON,
+			&e.Author, &ide, &activeFile, &workspaceFilesJSON, &promptType,
+			&toolsInvokedJSON, &filesMentionedJSON,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan event: %w", err)
+		}
+
+		e.Timestamp = time.Unix(timestampUnix, 0)
+
+		if modelVersion.Valid {
+			e.ModelVersion = modelVersion.String
+		}
+		if responseText.Valid {
+			e.ResponseText = responseText.String
+		}
+		if latencyMs.Valid {
+			e.LatencyMs = int(latencyMs.Int64)
+		}
+		if gitCommit.Valid {
+			e.GitCommit = gitCommit.String
+		}
+		if gitBranch.Valid {
+			e.GitBranch = gitBranch.String
+		}
+		if gitDirty.Valid {
+			e.GitDirty = gitDirty.Bool
+		}
+		if ide.Valid {
+			e.IDE = ide.String
+		}
+		if activeFile.Valid {
+			e.ActiveFile = activeFile.String
+		}
+		if promptType != "" {
+			e.PromptType = promptType
+		}
+
+		json.Unmarshal([]byte(dirtyFilesJSON), &e.DirtyFiles)         //nolint:errcheck
+		json.Unmarshal([]byte(workspaceFilesJSON), &e.WorkspaceFiles) //nolint:errcheck
+		json.Unmarshal([]byte(toolsInvokedJSON), &e.ToolsInvoked)     //nolint:errcheck
+		json.Unmarshal([]byte(filesMentionedJSON), &e.FilesMentioned) //nolint:errcheck
+
+		events = append(events, &e)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating events: %w", err)
+	}
+
+	return events, nil
+}
+
+func exportJSON(events []*storage.PromptEvent) ([]byte, error) {
+	return json.MarshalIndent(events, "", "  ")
+}
+
+func exportCSV(events []*storage.PromptEvent) ([]byte, error) {
+	var buf strings.Builder
+
+	buf.WriteString("id,timestamp,session_id,agent,model_version,prompt_text,response_text,")
+	buf.WriteString("tokens_in,tokens_out,latency_ms,repo_path,git_commit,git_branch,git_dirty,")
+	buf.WriteString("author,ide,active_file,prompt_type,tools_invoked,files_mentioned\n")
+
+	for _, e := range events {
+		fields := []string{
+			e.ID,
+			e.Timestamp.Format(time.RFC3339),
+			e.SessionID,
+			e.Agent,
+			e.ModelVersion,
+			escapeCSV(e.PromptText),
+			escapeCSV(e.ResponseText),
+			fmt.Sprintf("%d", e.TokensIn),
+			fmt.Sprintf("%d", e.TokensOut),
+			fmt.Sprintf("%d", e.LatencyMs),
+			e.RepoPath,
+			e.GitCommit,
+			e.GitBranch,
+			fmt.Sprintf("%t", e.GitDirty),
+			e.Author,
+			e.IDE,
+			e.ActiveFile,
+			e.PromptType,
+			escapeCSV(strings.Join(e.ToolsInvoked, ";")),
+			escapeCSV(strings.Join(e.FilesMentioned, ";")),
+		}
+
+		buf.WriteString(strings.Join(fields, ","))
+		buf.WriteString("\n")
+	}
+
+	return []byte(buf.String()), nil
+}
+
+func escapeCSV(field string) string {
+	if strings.ContainsAny(field, ",\"\n\r") {
+		field = strings.ReplaceAll(field, "\"", "\"\"")
+		return "\"" + field + "\""
+	}
+	return field
 }

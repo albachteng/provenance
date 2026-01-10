@@ -127,6 +127,47 @@ Once the daemon is running and capturing events, you can query them:
 ./prov search "authentication"
 ```
 
+### Export Session Data
+
+Export your AI interaction data to CSV or JSON for analysis, reporting, or integration with other tools:
+
+```bash
+# Export all events as JSON (default format, prints to stdout)
+./prov export
+
+# Export as CSV
+./prov export --format csv
+
+# Export to a file
+./prov export --format json --output sessions.json
+./prov export --format csv --output sessions.csv
+
+# Export a specific session
+./prov export --session <session-id> --output session.json
+
+# Export events from the last 7 days
+./prov export --since "7 days ago" --format csv --output recent.csv
+
+# Export events from the last 24 hours
+./prov export --since "24 hours ago" --format json
+```
+
+**Export options:**
+- `--format`: Output format (`json` or `csv`, defaults to `json`)
+- `--output`: Write to file instead of stdout
+- `--session`: Export only events from a specific session ID
+- `--since`: Export events since a relative time (e.g., "7 days ago", "2 hours ago")
+
+**CSV format includes:**
+- Event metadata (ID, timestamp, session ID, agent, model version)
+- Prompt and response text
+- Token counts and latency metrics
+- Git context (commit, branch, dirty state)
+- Author, IDE, and file information
+- Tools invoked and files mentioned (semicolon-separated)
+
+**JSON format** provides the complete event data structure with all fields and nested arrays.
+
 ### Configuration
 
 AI Provenance supports a hierarchical configuration system with sensible defaults.
@@ -218,6 +259,10 @@ go build -o prov ./cmd/prov
 
 # Search for specific prompts
 ./prov search "authentication"
+
+# Export your session data
+./prov export --format csv --output my-ai-sessions.csv
+./prov export --format json --output my-ai-sessions.json
 ```
 
 ### With CLI Tools
