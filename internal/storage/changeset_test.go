@@ -39,16 +39,16 @@ func TestCreateChangeSet(t *testing.T) {
 
 	// Create a change set linking the prompt to a commit
 	changeSet := &ChangeSet{
-		ID:                   "cs-test-1",
-		PromptID:             "evt-test-123",
-		SessionID:            "session-123",
-		Timestamp:            time.Now(),
-		FilesChanged:         []string{"auth.go", "auth_test.go"},
-		DiffSummary:          "+150 -20",
-		CommitIntroduced:     "abc123def456",
-		CorrelationMethod:    "git_hook",
-		Confidence:           0.95,
-		TimeToFirstChangeMs:  5000,
+		ID:                  "cs-test-1",
+		PromptID:            "evt-test-123",
+		SessionID:           "session-123",
+		Timestamp:           time.Now(),
+		FilesChanged:        []string{"auth.go", "auth_test.go"},
+		DiffSummary:         "+150 -20",
+		CommitIntroduced:    "abc123def456",
+		CorrelationMethod:   "git_hook",
+		Confidence:          0.95,
+		TimeToFirstChangeMs: 5000,
 	}
 
 	err = CreateChangeSet(db, changeSet)

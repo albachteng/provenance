@@ -200,16 +200,16 @@ func CorrelateCommitToPrompts(db *sql.DB, commitInfo *CommitInfo, timeWindow tim
 
 		// Create change set
 		changeSet := &storage.ChangeSet{
-			ID:                   fmt.Sprintf("cs-%d-%s", time.Now().UnixNano(), prompt.ID[:8]),
-			PromptID:             prompt.ID,
-			SessionID:            prompt.SessionID,
-			Timestamp:            commitInfo.Timestamp,
-			FilesChanged:         commitInfo.FilesChanged,
-			DiffSummary:          commitInfo.DiffSummary,
-			CommitIntroduced:     commitInfo.SHA,
-			CorrelationMethod:    "git_hook",
-			Confidence:           combinedConf,
-			TimeToFirstChangeMs:  timeToChange.Milliseconds(),
+			ID:                  fmt.Sprintf("cs-%d-%s", time.Now().UnixNano(), prompt.ID[:8]),
+			PromptID:            prompt.ID,
+			SessionID:           prompt.SessionID,
+			Timestamp:           commitInfo.Timestamp,
+			FilesChanged:        commitInfo.FilesChanged,
+			DiffSummary:         commitInfo.DiffSummary,
+			CommitIntroduced:    commitInfo.SHA,
+			CorrelationMethod:   "git_hook",
+			Confidence:          combinedConf,
+			TimeToFirstChangeMs: timeToChange.Milliseconds(),
 		}
 
 		// Store in database

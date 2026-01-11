@@ -9,16 +9,16 @@ import (
 
 // ChangeSet represents a correlation between a prompt and code changes
 type ChangeSet struct {
-	ID                   string
-	PromptID             string
-	SessionID            string
-	Timestamp            time.Time
-	FilesChanged         []string
-	DiffSummary          string
-	CommitIntroduced     string
-	CorrelationMethod    string
-	Confidence           float64
-	TimeToFirstChangeMs  int64
+	ID                  string
+	PromptID            string
+	SessionID           string
+	Timestamp           time.Time
+	FilesChanged        []string
+	DiffSummary         string
+	CommitIntroduced    string
+	CorrelationMethod   string
+	Confidence          float64
+	TimeToFirstChangeMs int64
 }
 
 // CreateChangeSet stores a new change set in the database

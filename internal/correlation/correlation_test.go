@@ -12,11 +12,11 @@ import (
 // TestCalculateTimeConfidence tests confidence scoring based on time delta
 func TestCalculateTimeConfidence(t *testing.T) {
 	tests := []struct {
-		name           string
-		promptTime     time.Time
-		commitTime     time.Time
-		expectedRange  [2]float64 // min, max confidence
-		description    string
+		name          string
+		promptTime    time.Time
+		commitTime    time.Time
+		expectedRange [2]float64 // min, max confidence
+		description   string
 	}{
 		{
 			name:          "immediate (1 second)",
@@ -84,11 +84,11 @@ func TestCalculateTimeConfidence(t *testing.T) {
 // TestCalculateFileOverlapConfidence tests confidence scoring based on file overlap
 func TestCalculateFileOverlapConfidence(t *testing.T) {
 	tests := []struct {
-		name              string
-		filesMentioned    []string
-		filesChanged      []string
-		expectedRange     [2]float64
-		description       string
+		name           string
+		filesMentioned []string
+		filesChanged   []string
+		expectedRange  [2]float64
+		description    string
 	}{
 		{
 			name:           "perfect overlap",
@@ -333,7 +333,6 @@ func TestCorrelateCommitToPrompts(t *testing.T) {
 	}
 
 	// Create prompts
-
 
 	prompts := []*storage.PromptEvent{
 		{
