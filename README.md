@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: ✅ Phase 0 complete - Core foundation with session management and configuration! ✅ Phase 2A complete - Claude Code hooks actively capturing! All prompts and tool invocations automatically logged with intelligent session boundaries. See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 0 complete - Core foundation with session management! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ Phase 4 Features 1-4 complete - Sessions, statistics, export, and **git commit correlation** with confidence scoring! See `ROADMAP.md` for development plans.
 
 ## Quick Start
 
@@ -74,6 +74,48 @@ This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/s
 **Using with multiple Claude projects:**
 
 The hooks are installed globally for your user. Every Claude Code project will automatically capture events to the same database. To view events for a specific project, navigate to that directory and run `./prov list`.
+
+### Link Commits to AI Prompts (Git Correlation)
+
+Automatically correlate your git commits with the AI prompts that generated them:
+
+```bash
+# In your git repository, install the post-commit hook
+./prov install-hook post-commit
+```
+
+The hook automatically:
+- Runs after each commit
+- Finds AI prompts from the last 15 minutes
+- Creates change_sets linking prompts to commits
+- Calculates confidence scores based on timing and file overlap
+
+**Confidence scoring factors:**
+- **Time proximity**: Recent prompts (< 2 min) get higher confidence
+- **File overlap**: Prompts mentioning changed files get higher confidence
+- **Combined score**: Weighted average (40% time, 60% file overlap)
+
+**Check hook status:**
+```bash
+./prov hooks status
+
+# Output:
+# Installed hooks:
+#
+# claude-code:
+#   - claude-prompt.py
+#   - claude-tool-pre.py
+#   - claude-tool-post.py
+#   - claude-session.py
+#
+# git:
+#   - post-commit
+```
+
+**Uninstall git hook:**
+```bash
+./prov hooks uninstall post-commit
+```
 
 **Option 2: Shell Hook (For CLI Tools)**
 
@@ -241,7 +283,11 @@ go build -o prov ./cmd/prov
 # Install Claude Code hooks (one-time setup)
 ./prov install-hooks claude-code
 
+# Install git correlation hook (in your repository)
+./prov install-hook post-commit
+
 # Now use Claude Code normally - all interactions are captured automatically!
+# When you commit, the hook links commits to your prompts
 
 # View captured events
 ./prov list

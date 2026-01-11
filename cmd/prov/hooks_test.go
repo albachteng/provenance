@@ -338,7 +338,7 @@ func TestHooksStatus(t *testing.T) {
 	}
 }
 
-// TestHooksStatusNoHooks tests status when no hooks are installed
+// TestHooksStatusNoHooks tests status when no Claude Code hooks are installed
 func TestHooksStatusNoHooks(t *testing.T) {
 	setupTestEnv(t)
 
@@ -347,8 +347,10 @@ func TestHooksStatusNoHooks(t *testing.T) {
 		t.Fatalf("hooks status failed: %v", err)
 	}
 
-	if !strings.Contains(output, "No hooks installed") {
-		t.Errorf("Expected 'No hooks installed' message, got: %s", output)
+	// Should either say "No hooks installed" or show only git hooks (if running in a git repo)
+	// but should NOT show claude-code hooks
+	if strings.Contains(output, "claude-code:") {
+		t.Errorf("Expected no Claude Code hooks, but found them in output: %s", output)
 	}
 }
 

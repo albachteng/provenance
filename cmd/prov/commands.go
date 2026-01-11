@@ -780,7 +780,11 @@ func hooksStatus() error {
 		// Check for post-commit hook
 		postCommitPath := filepath.Join(repoPath, ".git", "hooks", "post-commit")
 		if _, err := os.Stat(postCommitPath); err == nil {
-			gitHooks["post-commit"] = true
+			// Read hook to verify it's our hook (contains "correlate-commit")
+			content, err := os.ReadFile(postCommitPath)
+			if err == nil && strings.Contains(string(content), "correlate-commit") {
+				gitHooks["post-commit"] = true
+			}
 		}
 	}
 
