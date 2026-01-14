@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestInstallHooksClaudeCode tests installing Claude Code hooks
@@ -166,7 +167,14 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() {
+		runCLI(t, "daemon", "stop")
+		// Give daemon time to fully shutdown and clean up
+		time.Sleep(200 * time.Millisecond)
+		// Ensure socket is removed
+		socketPath := filepath.Join(tmpDir, "daemon.sock")
+		os.Remove(socketPath)
+	}()
 
 	waitForDaemonReady(t, tmpDir)
 
@@ -240,7 +248,14 @@ func TestCaptureHookToolUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() {
+		runCLI(t, "daemon", "stop")
+		// Give daemon time to fully shutdown and clean up
+		time.Sleep(200 * time.Millisecond)
+		// Ensure socket is removed
+		socketPath := filepath.Join(tmpDir, "daemon.sock")
+		os.Remove(socketPath)
+	}()
 
 	waitForDaemonReady(t, tmpDir)
 
