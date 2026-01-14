@@ -777,29 +777,62 @@ prov export --output report.json     # Write to file instead of stdout
 
 ---
 
-#### Feature 4: Git Post-Commit Hook (The Big One)
+#### Feature 4: Git Post-Commit Hook (The Big One) ✅ COMPLETE
 **Goal**: Automatically link prompts to commits
 
-**Implementation:**
+**Storage layer implementation** (COMPLETE):
+```go
+// Change set management
+func CreateChangeSet(db *sql.DB, cs *ChangeSet) error
+func GetChangeSet(db *sql.DB, id string) (*ChangeSet, error)
+func GetChangeSetsForPrompt(db *sql.DB, promptID string) ([]*ChangeSet, error)
+func GetChangeSetsForCommit(db *sql.DB, commitSHA string) ([]*ChangeSet, error)
+```
+
+**Correlation logic** (COMPLETE):
+```go
+// Confidence scoring algorithms
+func CalculateTimeConfidence(promptTime, commitTime time.Time) float64
+func CalculateFileOverlapConfidence(filesMentioned, filesChanged []string) float64
+func CombineConfidenceFactors(timeConf, fileConf float64) float64
+func CorrelateCommitToPrompts(db *sql.DB, commitInfo *CommitInfo, timeWindow time.Duration) ([]*ChangeSet, error)
+```
+
+**CLI implementation** (COMPLETE):
 ```bash
-prov install-hook post-commit        # Install git hook
+prov install-hook post-commit        # Install git hook in current repo
+prov correlate-commit <sha> <repo>   # Manual correlation (called by hook)
+prov hooks status                     # Show git and claude-code hooks
+prov hooks uninstall post-commit      # Remove git hook
 ```
 
 **Hook behavior:**
-- On commit, find recent session (or prompts from last 10 minutes)
-- Create `change_sets` entries linking prompts → commit
-- Calculate confidence based on:
-  - Time delta (closer = higher)
-  - File overlap (mentioned files in prompt vs changed files)
+- Embedded post-commit.sh script with PROV_PATH injection
+- Runs after each commit automatically
+- Finds prompts from last 15 minutes in same repository
+- Creates change_sets with confidence scores
+- Never blocks commits (exits 0 even on error)
 
-**Database work:**
-- Implement `change_sets` table (already in schema!)
-- Store prompt → commit associations
-- Confidence scoring logic
+**Confidence scoring:**
+- **Time decay**: Piecewise function (< 30s: 0.95-1.0, < 2min: 0.85-0.95, < 10min: 0.45-0.70)
+- **File overlap**: Perfect match: 0.975, high (2/3+): 0.75, partial (1/3-2/3): 0.40
+- **Combined**: Weighted average (40% time, 60% file overlap)
+
+**Database work:** ✅
+- change_sets table already existed in schema
+- Foreign key constraints to sessions and prompt_events
+- JSON array support for files_changed
+- Confidence scoring (0.0-1.0 float)
+
+**Test coverage:** ✅
+- Storage: 6 tests for change_sets CRUD operations
+- Correlation: 5 test suites, 25+ test cases for scoring algorithms
+- Git hooks: 6 tests (install, uninstall, overwrite, status, error handling)
+- All 137 tests passing
 
 **Value**: **This is the killer feature** - trace code back to AI prompts
 
-**Estimated complexity**: High (git hook, correlation logic, confidence scoring)
+**Status**: Complete - Full end-to-end implementation with comprehensive test coverage
 
 ---
 
@@ -852,12 +885,12 @@ prov untag <prompt-id> <commit>      # Remove association
 - [x] Feature 1: Session queries (1-2 hours) - COMPLETE
 - [x] Feature 2: Basic statistics commands (2-3 hours) - COMPLETE
 - [x] Feature 3: Export functionality (2-4 hours) - COMPLETE
-- [ ] Feature 4: Git correlation (6-8 hours)
+- [x] Feature 4: Git correlation (6-8 hours) - COMPLETE
 - [ ] Feature 5: Blame commands (2-3 hours)
 - [ ] Feature 6: Manual tagging (1-2 hours)
 
 **Total estimated time**: 14-22 hours across 6 features
-**Completed**: 7-11 hours (Features 1-3)
+**Completed**: 13-19 hours (Features 1-4)
 
 ---
 

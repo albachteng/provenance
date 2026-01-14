@@ -38,10 +38,14 @@ func main() {
 		cmdWrap()
 	case "install-hooks":
 		cmdInstallHooks()
+	case "install-hook":
+		cmdInstallHook()
 	case "hooks":
 		cmdHooks()
 	case "capture-hook":
 		cmdCaptureHook()
+	case "correlate-commit":
+		cmdCorrelateCommit()
 	case "list":
 		cmdList()
 	case "show":
@@ -281,6 +285,35 @@ func cmdCaptureHook() {
 	if err := captureHook(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error capturing hook: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func cmdInstallHook() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov install-hook <hook-type>")
+		fmt.Fprintln(os.Stderr, "Supported hook types: post-commit")
+		os.Exit(1)
+	}
+
+	hookType := os.Args[2]
+	if err := installGitHook(hookType); err != nil {
+		fmt.Fprintf(os.Stderr, "Error installing hook: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdCorrelateCommit() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "Usage: prov correlate-commit <commit-sha> <repo-path>")
+		os.Exit(1)
+	}
+
+	commitSHA := os.Args[2]
+	repoPath := os.Args[3]
+
+	if err := correlateCommit(commitSHA, repoPath); err != nil {
+		// Don't print error - hook should fail silently
+		os.Exit(0)
 	}
 }
 

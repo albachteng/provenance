@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/albachteng/provenance/internal/git"
 	"github.com/albachteng/provenance/internal/storage"
 )
 
@@ -128,4 +129,23 @@ func (m *Manager) CheckSessionBoundaries() bool {
 	}
 
 	return false
+}
+
+// UpdateGitState captures current git state and updates session tracking
+func (m *Manager) UpdateGitState() {
+	if m.currentSession == nil {
+		return
+	}
+
+	gitInfo, err := git.CaptureGitState(m.currentSession.RepoPath)
+	if err != nil {
+		// Not in a git repo or git command failed - leave fields empty
+		return
+	}
+
+	m.currentSession.LastGitCommit = m.currentSession.GitCommit
+	m.currentSession.LastGitBranch = m.currentSession.GitBranch
+
+	m.currentSession.GitCommit = gitInfo.Head
+	m.currentSession.GitBranch = gitInfo.Branch
 }

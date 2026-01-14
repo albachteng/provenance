@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/albachteng/provenance/internal/config"
+	"github.com/albachteng/provenance/internal/correlation"
 	"github.com/albachteng/provenance/internal/daemon"
 	"github.com/albachteng/provenance/internal/git"
 	"github.com/albachteng/provenance/internal/session"
@@ -35,6 +36,9 @@ var claudeToolPostTemplate string
 
 //go:embed hooks/claude-session.py
 var claudeSessionScript string
+
+//go:embed hooks/post-commit.sh
+var postCommitHookTemplate string
 
 // daemonStart starts the daemon in the background
 func daemonStart() {
@@ -756,39 +760,68 @@ func hooksStatus() error {
 	hooksDir := filepath.Join(getProvenanceHome(), "hooks")
 
 	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("No hooks installed")
-			return nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to read hooks directory: %w", err)
 	}
 
 	claudeHooks := []string{}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "claude-") && strings.HasSuffix(entry.Name(), ".py") {
-			claudeHooks = append(claudeHooks, entry.Name())
+	if err == nil {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), "claude-") && strings.HasSuffix(entry.Name(), ".py") {
+				claudeHooks = append(claudeHooks, entry.Name())
+			}
 		}
 	}
 
-	if len(claudeHooks) == 0 {
+	// Check for git hooks
+	gitHooks := map[string]bool{}
+	repoPath, err := findGitRoot()
+	if err == nil {
+		// Check for post-commit hook
+		postCommitPath := filepath.Join(repoPath, ".git", "hooks", "post-commit")
+		if _, err := os.Stat(postCommitPath); err == nil {
+			// Read hook to verify it's our hook (contains "correlate-commit")
+			content, err := os.ReadFile(postCommitPath)
+			if err == nil && strings.Contains(string(content), "correlate-commit") {
+				gitHooks["post-commit"] = true
+			}
+		}
+	}
+
+	if len(claudeHooks) == 0 && len(gitHooks) == 0 {
 		fmt.Println("No hooks installed")
 		return nil
 	}
 
 	fmt.Println("Installed hooks:")
 	fmt.Println()
-	fmt.Println("claude-code:")
-	for _, hook := range claudeHooks {
-		fmt.Printf("  - %s\n", hook)
+
+	if len(claudeHooks) > 0 {
+		fmt.Println("claude-code:")
+		for _, hook := range claudeHooks {
+			fmt.Printf("  - %s\n", hook)
+		}
+		fmt.Println()
+	}
+
+	if len(gitHooks) > 0 {
+		fmt.Println("git:")
+		for hook := range gitHooks {
+			fmt.Printf("  - %s\n", hook)
+		}
 	}
 
 	return nil
 }
 
 func uninstallHooks(agent string) error {
+	// Check if this is a git hook type
+	if agent == "post-commit" {
+		return uninstallGitHook(agent)
+	}
+
 	if agent != "claude-code" {
-		return fmt.Errorf("agent '%s' not supported (supported: claude-code)", agent)
+		return fmt.Errorf("agent '%s' not supported (supported: claude-code, post-commit)", agent)
 	}
 
 	hooksDir := filepath.Join(getProvenanceHome(), "hooks")
@@ -844,6 +877,142 @@ func uninstallHooks(agent string) error {
 	}
 
 	fmt.Println("Claude Code hooks uninstalled")
+
+	return nil
+}
+
+// installGitHook installs a git hook in the current repository
+func installGitHook(hookType string) error {
+	if hookType != "post-commit" {
+		return fmt.Errorf("hook type '%s' not supported (supported: post-commit)", hookType)
+	}
+
+	// Find git repository root
+	repoPath, err := findGitRoot()
+	if err != nil {
+		return fmt.Errorf("not a git repository: %w", err)
+	}
+
+	// Get prov binary path
+	provPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	// Inject prov path into hook template
+	hookContent := strings.ReplaceAll(postCommitHookTemplate, "{{PROV_PATH}}", provPath)
+
+	// Write hook script
+	hookPath := filepath.Join(repoPath, ".git", "hooks", "post-commit")
+	if err := os.WriteFile(hookPath, []byte(hookContent), 0755); err != nil {
+		return fmt.Errorf("failed to write hook script: %w", err)
+	}
+
+	fmt.Printf("Git post-commit hook installed: %s\n", hookPath)
+	fmt.Println("Hook will automatically correlate commits with recent prompts")
+
+	return nil
+}
+
+// uninstallGitHook removes a git hook from the current repository
+func uninstallGitHook(hookType string) error {
+	if hookType != "post-commit" {
+		return fmt.Errorf("hook type '%s' not supported (supported: post-commit)", hookType)
+	}
+
+	// Find git repository root
+	repoPath, err := findGitRoot()
+	if err != nil {
+		return fmt.Errorf("not a git repository: %w", err)
+	}
+
+	hookPath := filepath.Join(repoPath, ".git", "hooks", "post-commit")
+
+	if err := os.Remove(hookPath); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("Git post-commit hook not installed")
+			return nil
+		}
+		return fmt.Errorf("failed to remove hook: %w", err)
+	}
+
+	fmt.Println("Git post-commit hook uninstalled")
+	return nil
+}
+
+// correlateCommit correlates a commit with recent prompts
+func correlateCommit(commitSHA, repoPath string) error {
+	// Get database
+	db, err := openDB()
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close() //nolint:errcheck
+
+	// Get commit information
+	cmd := exec.Command("git", "show", "--format=%ct", "--name-only", "--no-patch", commitSHA)
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get commit info: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) < 1 {
+		return fmt.Errorf("invalid git show output")
+	}
+
+	// Parse timestamp
+	timestampStr := lines[0]
+	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse commit timestamp: %w", err)
+	}
+
+	// Get files changed
+	cmd = exec.Command("git", "show", "--format=", "--name-only", commitSHA)
+	cmd.Dir = repoPath
+	output, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get changed files: %w", err)
+	}
+
+	filesChanged := []string{}
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			filesChanged = append(filesChanged, line)
+		}
+	}
+
+	// Get diff stats
+	cmd = exec.Command("git", "show", "--format=", "--shortstat", commitSHA)
+	cmd.Dir = repoPath
+	output, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get diff stats: %w", err)
+	}
+	diffSummary := strings.TrimSpace(string(output))
+
+	// Create commit info
+	commitInfo := &correlation.CommitInfo{
+		SHA:          commitSHA,
+		Timestamp:    time.Unix(timestamp, 0),
+		RepoPath:     repoPath,
+		FilesChanged: filesChanged,
+		DiffSummary:  diffSummary,
+	}
+
+	// Correlate with prompts (use 15 minute window by default)
+	timeWindow := 15 * time.Minute
+	changeSets, err := correlation.CorrelateCommitToPrompts(db, commitInfo, timeWindow)
+	if err != nil {
+		return fmt.Errorf("failed to correlate commit: %w", err)
+	}
+
+	if len(changeSets) > 0 {
+		fmt.Printf("Correlated commit %s with %d prompt(s)\n", commitSHA[:8], len(changeSets))
+	}
 
 	return nil
 }

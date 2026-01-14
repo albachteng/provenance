@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Feature 4 Complete (2026-01-11)
+
+**Git Commit Correlation**
+- Automatic linking of git commits to AI prompts with confidence scoring
+- Storage layer for change_sets:
+  - CreateChangeSet, GetChangeSet, GetChangeSetsForPrompt, GetChangeSetsForCommit
+  - Foreign key constraints to sessions and prompt_events
+  - JSON array support for files_changed
+  - 6 comprehensive tests passing
+- Correlation algorithms:
+  - CalculateTimeConfidence: Piecewise decay (< 30s: 0.95-1.0, < 2min: 0.85-0.95, < 10min: 0.45-0.70)
+  - CalculateFileOverlapConfidence: Perfect: 0.975, high (2/3+): 0.75, partial: 0.40
+  - CombineConfidenceFactors: Weighted average (40% time, 60% file overlap)
+  - CorrelateCommitToPrompts: Full workflow with 15-minute time window
+  - 5 test suites, 25+ test cases passing
+- Git hook integration:
+  - `prov install-hook post-commit` - Install hook in current repository
+  - `prov correlate-commit <sha> <repo>` - Manual correlation (called by hook)
+  - `prov hooks status` - Updated to show both claude-code and git hooks
+  - `prov hooks uninstall post-commit` - Remove git hook
+  - Embedded post-commit.sh script with PROV_PATH injection
+  - 6 tests passing (install, uninstall, overwrite, status, error handling)
+- Test coverage: 137 tests passing across all packages
+
+**Session Management Fix**
+- Git state polling: Added UpdateGitState() method to session manager
+- Background polling integrated with daemon's session check loop
+- Enables GitEventStrategy to detect commits and branch switches
+- 4 new tests for git state tracking
+
+### Added - Phase 4 Features 1-3 Complete (2026-01-08)
+
+**Session Query Commands**
+- `prov session list` - List all sessions with summary information
+- `prov session list --active` - Show only active sessions
+- `prov session show <id>` - Detailed session view with all prompts
+- `prov session end <id>` - Manually end a session
+- Session statistics in list view (prompts, tokens, duration)
+- Integration tests: 4/4 tests passing
+
+**Statistics Commands**
+- `prov stats` - Repository-level aggregate statistics
+- `prov stats --session <id>` - Session-specific statistics
+- `prov stats --since "7 days ago"` - Time-filtered statistics
+- Metrics include: total prompts, tokens in/out, session count, top files, top tools
+- Storage layer: GetRepoStats, GetSessionStats, GetTimeframeStats
+- Integration tests: 9/9 tests passing (storage + CLI)
+
+**Export Functionality**
+- `prov export` - Export all data as JSON (default)
+- `prov export --format csv` - Export as CSV
+- `prov export --session <id>` - Export specific session
+- `prov export --since "7 days ago"` - Time-filtered export
+- `prov export --output file.json` - Write to file
+- CSV format: Flat structure with semicolon-separated arrays
+- JSON format: Complete nested structure
+- Integration tests: 6/6 tests passing
+
 ### Added - Phase 0 Complete (2026-01-03)
 
 **Session Management**

@@ -171,6 +171,8 @@ func (d *Daemon) sessionCheckLoop() {
 		case <-d.shutdown:
 			return
 		case <-d.ticker.C:
+			// Update git state before checking boundaries
+			d.sessionMgr.UpdateGitState()
 			d.sessionMgr.CheckSessionBoundaries()
 		}
 	}
