@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: ✅ Phase 0 complete - Core foundation with session management! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ Phase 4 Features 1-4 complete - Sessions, statistics, export, and **git commit correlation** with confidence scoring! See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 0 complete - Core foundation with session management! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ Phase 4 Features 1-5 complete - Sessions, statistics, export, **git commit correlation** with confidence scoring, and **git blame**! See `ROADMAP.md` for development plans.
 
 ## Quick Start
 
@@ -169,6 +169,47 @@ Once the daemon is running and capturing events, you can query them:
 ./prov search "authentication"
 ```
 
+### Trace Commits to AI Prompts (Blame)
+
+Find out which AI prompts led to specific code changes in your repository:
+
+```bash
+# Blame a commit (supports full or short SHA)
+./prov blame abc123def456
+./prov blame abc123  # Short SHA works too
+
+# Blame a file to see all AI prompts that modified it
+./prov blame src/auth.go
+./prov blame internal/handlers/user.go
+```
+
+**Example output:**
+```
+Found 1 prompt(s) that led to changes:
+
+[1] Commit: abc123def456 (Confidence: 0.95 / 95%)
+    Prompt ID: prompt-blame-1
+    Timestamp: 2026-01-15 17:35:11
+    Agent: claude-code
+    Author: testuser
+    Prompt: Implement user authentication
+    Files Changed:
+      - auth.go
+      - auth_test.go
+    Diff: +150 -20
+```
+
+**Use cases:**
+- **Code review**: See which AI prompts generated specific commits
+- **Debugging**: Trace bugs back to the original AI conversation
+- **Learning**: Understand how specific features were built
+- **Audit**: Track AI contributions to your codebase
+- **Documentation**: Link code changes to their requirements/context
+
+**Requirements:**
+- Git repository with `post-commit` hook installed (see "Link Commits to AI Prompts")
+- At least one commit made after installing the hook
+
 ### Export Session Data
 
 Export your AI interaction data to CSV or JSON for analysis, reporting, or integration with other tools:
@@ -309,6 +350,14 @@ go build -o prov ./cmd/prov
 # Export your session data
 ./prov export --format csv --output my-ai-sessions.csv
 ./prov export --format json --output my-ai-sessions.json
+
+# After making a commit, blame it to see which prompts generated it
+git add .
+git commit -m "Add authentication feature"
+./prov blame HEAD  # or use the commit SHA
+
+# Blame a specific file to see its AI history
+./prov blame src/auth.go
 ```
 
 ### With CLI Tools

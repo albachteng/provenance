@@ -211,3 +211,119 @@ func GetChangeSetsForCommit(db *sql.DB, commitSHA string) ([]*ChangeSet, error) 
 
 	return changeSets, nil
 }
+
+// GetChangeSetsForCommitPrefix retrieves all change sets matching a commit SHA prefix, ordered by confidence
+func GetChangeSetsForCommitPrefix(db *sql.DB, commitPrefix string) ([]*ChangeSet, error) {
+	query := `
+		SELECT id, prompt_id, session_id, timestamp,
+		       files_changed, diff_summary, commit_introduced,
+		       correlation_method, confidence, time_to_first_change_ms
+		FROM change_sets
+		WHERE commit_introduced LIKE ?
+		ORDER BY confidence DESC
+	`
+
+	rows, err := db.Query(query, commitPrefix+"%")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query change sets: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var changeSets []*ChangeSet
+
+	for rows.Next() {
+		var cs ChangeSet
+		var timestampUnix int64
+		var filesChangedJSON string
+
+		err := rows.Scan(
+			&cs.ID,
+			&cs.PromptID,
+			&cs.SessionID,
+			&timestampUnix,
+			&filesChangedJSON,
+			&cs.DiffSummary,
+			&cs.CommitIntroduced,
+			&cs.CorrelationMethod,
+			&cs.Confidence,
+			&cs.TimeToFirstChangeMs,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan change set: %w", err)
+		}
+
+		cs.Timestamp = time.Unix(timestampUnix, 0)
+
+		if err := json.Unmarshal([]byte(filesChangedJSON), &cs.FilesChanged); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal files_changed: %w", err)
+		}
+
+		changeSets = append(changeSets, &cs)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating change sets: %w", err)
+	}
+
+	return changeSets, nil
+}
+
+// GetChangeSetsForFile retrieves all change sets that modified a specific file, ordered by confidence
+func GetChangeSetsForFile(db *sql.DB, filePath string) ([]*ChangeSet, error) {
+	query := `
+		SELECT id, prompt_id, session_id, timestamp,
+		       files_changed, diff_summary, commit_introduced,
+		       correlation_method, confidence, time_to_first_change_ms
+		FROM change_sets
+		ORDER BY confidence DESC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query change sets: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var changeSets []*ChangeSet
+
+	for rows.Next() {
+		var cs ChangeSet
+		var timestampUnix int64
+		var filesChangedJSON string
+
+		err := rows.Scan(
+			&cs.ID,
+			&cs.PromptID,
+			&cs.SessionID,
+			&timestampUnix,
+			&filesChangedJSON,
+			&cs.DiffSummary,
+			&cs.CommitIntroduced,
+			&cs.CorrelationMethod,
+			&cs.Confidence,
+			&cs.TimeToFirstChangeMs,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan change set: %w", err)
+		}
+
+		cs.Timestamp = time.Unix(timestampUnix, 0)
+
+		if err := json.Unmarshal([]byte(filesChangedJSON), &cs.FilesChanged); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal files_changed: %w", err)
+		}
+
+		for _, file := range cs.FilesChanged {
+			if file == filePath {
+				changeSets = append(changeSets, &cs)
+				break
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating change sets: %w", err)
+	}
+
+	return changeSets, nil
+}
