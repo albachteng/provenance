@@ -1759,3 +1759,77 @@ func escapeCSV(field string) string {
 	}
 	return field
 }
+
+// cmdBlame shows which AI prompts led to changes in a commit or file
+func cmdBlame() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov blame <commit-sha|file-path>")
+		os.Exit(1)
+	}
+
+	target := os.Args[2]
+
+	db, err := openDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close() //nolint:errcheck
+
+	var changeSets []*storage.ChangeSet
+	changeSets, err = storage.GetChangeSetsForCommitPrefix(db, target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to query change sets: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(changeSets) == 0 {
+		changeSets, err = storage.GetChangeSetsForFile(db, target)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to query change sets: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if len(changeSets) == 0 {
+		fmt.Println("No prompts found for this commit or file")
+		return
+	}
+
+	fmt.Printf("Found %d prompt(s) that led to changes:\n\n", len(changeSets))
+
+	for i, cs := range changeSets {
+		prompt, err := storage.GetPromptEvent(db, cs.PromptID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to get prompt %s: %v\n", cs.PromptID, err)
+			continue
+		}
+
+		fmt.Printf("[%d] Commit: %s (Confidence: %.2f / %.0f%%)\n", i+1, cs.CommitIntroduced, cs.Confidence, cs.Confidence*100)
+		fmt.Printf("    Prompt ID: %s\n", prompt.ID)
+		fmt.Printf("    Timestamp: %s\n", prompt.Timestamp.Format("2006-01-02 15:04:05"))
+		fmt.Printf("    Agent: %s\n", prompt.Agent)
+		fmt.Printf("    Author: %s\n", prompt.Author)
+		fmt.Printf("    Prompt: %s\n", truncatePrompt(prompt.PromptText, 200))
+
+		if len(cs.FilesChanged) > 0 {
+			fmt.Printf("    Files Changed:\n")
+			for _, file := range cs.FilesChanged {
+				fmt.Printf("      - %s\n", file)
+			}
+		}
+
+		if cs.DiffSummary != "" {
+			fmt.Printf("    Diff: %s\n", cs.DiffSummary)
+		}
+
+		fmt.Println()
+	}
+}
+
+func truncatePrompt(prompt string, maxLen int) string {
+	if len(prompt) <= maxLen {
+		return prompt
+	}
+	return prompt[:maxLen-3] + "..."
+}

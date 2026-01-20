@@ -58,6 +58,8 @@ func main() {
 		cmdStats()
 	case "export":
 		cmdExport()
+	case "blame":
+		cmdBlame()
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -96,6 +98,7 @@ func printUsage() {
 	fmt.Println("  list                 List recent prompts")
 	fmt.Println("  show <id>            Show prompt details")
 	fmt.Println("  search <query>       Search prompts")
+	fmt.Println("  blame <commit|file>  Show which prompts led to changes in a commit or file")
 	fmt.Println()
 	fmt.Println("Run 'prov <command> --help' for more information")
 }
