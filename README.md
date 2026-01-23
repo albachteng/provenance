@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: ✅ Phase 0 complete - Core foundation with session management! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ Phase 4 Features 1-5 complete - Sessions, statistics, export, **git commit correlation** with confidence scoring, and **git blame**! See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 0 complete - Core foundation with session management! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ Phase 4 Features 1-5 complete - Sessions, statistics, export, **git commit correlation** with confidence scoring, and **git blame**! Next: Manual tagging (Feature 6). See `ROADMAP.md` for development plans.
 
 ## Quick Start
 
