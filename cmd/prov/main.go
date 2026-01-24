@@ -60,6 +60,10 @@ func main() {
 		cmdExport()
 	case "blame":
 		cmdBlame()
+	case "tag":
+		cmdTag()
+	case "untag":
+		cmdUntag()
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -99,6 +103,9 @@ func printUsage() {
 	fmt.Println("  show <id>            Show prompt details")
 	fmt.Println("  search <query>       Search prompts")
 	fmt.Println("  blame <commit|file>  Show which prompts led to changes in a commit or file")
+	fmt.Println("  tag <prompt-id> --commit <sha>  Manually link prompt to commit")
+	fmt.Println("  tag <prompt-id> --file <path>   Manually link prompt to file")
+	fmt.Println("  untag <prompt-id> <commit>      Remove manual tag")
 	fmt.Println()
 	fmt.Println("Run 'prov <command> --help' for more information")
 }
