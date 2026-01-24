@@ -836,25 +836,32 @@ prov hooks uninstall post-commit      # Remove git hook
 
 ---
 
-#### Feature 5: Blame/Trace Commands
+#### Feature 5: Blame/Trace Commands ✅ COMPLETE
 **Goal**: Reverse lookup - code → prompts
 
-**Commands:**
+**Commands implemented:**
 ```bash
 prov blame <file>                    # Prompts that touched this file
-prov blame <commit>                  # Prompts linked to this commit
+prov blame <commit>                  # Prompts linked to this commit (full or short SHA)
 prov trace <file> --lines 10-20      # Prompts for specific lines (future)
 ```
 
-**Database work:**
-- Query `change_sets` table
+**Database work:** ✅
+- Query `change_sets` table by commit SHA or file path
 - Join with `prompt_events` for full context
+- Support prefix matching for short commit SHAs
+- Order results by confidence score (highest first)
+
+**CLI implementation:** ✅
+- Command routing for blame with commit/file detection
+- Formatted output with prompt details, confidence scores, and file changes
+- Integration tests (8/8 tests passing)
 
 **Value**: "Who (or what AI) wrote this code?"
 
 **Estimated complexity**: Medium (depends on Feature 4 completion)
 
-**Dependency**: Requires Feature 4 (git correlation)
+**Status**: Complete - Full blame functionality with comprehensive test coverage (8 test functions, all passing)
 
 ---
 
@@ -886,11 +893,12 @@ prov untag <prompt-id> <commit>      # Remove association
 - [x] Feature 2: Basic statistics commands (2-3 hours) - COMPLETE
 - [x] Feature 3: Export functionality (2-4 hours) - COMPLETE
 - [x] Feature 4: Git correlation (6-8 hours) - COMPLETE
-- [ ] Feature 5: Blame commands (2-3 hours)
+- [x] Feature 5: Blame commands (2-3 hours) - COMPLETE
 - [ ] Feature 6: Manual tagging (1-2 hours)
 
 **Total estimated time**: 14-22 hours across 6 features
-**Completed**: 13-19 hours (Features 1-4)
+**Completed**: 15-22 hours (Features 1-5)
+**Remaining**: 1-2 hours (Feature 6 only!)
 
 ---
 
@@ -1203,4 +1211,4 @@ provenance/
 
 ---
 
-*Last updated: 2026-01-03 - Phase 0 complete (session management & configuration system), Phase 2A complete (Claude Code hooks)*
+*Last updated: 2026-01-20 - Phase 0 complete, Phase 2A complete (Claude Code hooks), Phase 4 Features 1-5 complete (blame tracing added!)*

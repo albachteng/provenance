@@ -327,3 +327,49 @@ func GetChangeSetsForFile(db *sql.DB, filePath string) ([]*ChangeSet, error) {
 
 	return changeSets, nil
 }
+
+// DeleteManualChangeSet removes a manual tag (only if correlation_method='manual')
+// Returns ErrNotFound if no matching manual tag exists
+func DeleteManualChangeSet(db *sql.DB, promptID, commitSHA string) error {
+	// First verify the tag exists and is manual
+	query := `
+		SELECT correlation_method
+		FROM change_sets
+		WHERE prompt_id = ? AND commit_introduced = ?
+	`
+
+	var correlationMethod string
+	err := db.QueryRow(query, promptID, commitSHA).Scan(&correlationMethod)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("tag not found: No manual tag for prompt %s and commit %s", promptID, commitSHA)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to query change set: %w", err)
+	}
+
+	if correlationMethod != "manual" {
+		return fmt.Errorf("not a manual tag (correlation method: %s)", correlationMethod)
+	}
+
+	// Delete the manual tag
+	deleteQuery := `
+		DELETE FROM change_sets
+		WHERE prompt_id = ? AND commit_introduced = ? AND correlation_method = 'manual'
+	`
+
+	result, err := db.Exec(deleteQuery, promptID, commitSHA)
+	if err != nil {
+		return fmt.Errorf("failed to delete change set: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}

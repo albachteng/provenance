@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -1805,7 +1806,12 @@ func cmdBlame() {
 			continue
 		}
 
-		fmt.Printf("[%d] Commit: %s (Confidence: %.2f / %.0f%%)\n", i+1, cs.CommitIntroduced, cs.Confidence, cs.Confidence*100)
+		correlationIndicator := ""
+		if cs.CorrelationMethod == "manual" {
+			correlationIndicator = " [manual]"
+		}
+
+		fmt.Printf("[%d] Commit: %s (Confidence: %.2f / %.0f%%)%s\n", i+1, cs.CommitIntroduced, cs.Confidence, cs.Confidence*100, correlationIndicator)
 		fmt.Printf("    Prompt ID: %s\n", prompt.ID)
 		fmt.Printf("    Timestamp: %s\n", prompt.Timestamp.Format("2006-01-02 15:04:05"))
 		fmt.Printf("    Agent: %s\n", prompt.Agent)
@@ -1832,4 +1838,119 @@ func truncatePrompt(prompt string, maxLen int) string {
 		return prompt
 	}
 	return prompt[:maxLen-3] + "..."
+}
+
+func cmdTag() {
+	// Check minimum args before parsing flags
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha>")
+		fmt.Fprintln(os.Stderr, "   or: prov tag <prompt-id> --file <path>")
+		os.Exit(1)
+	}
+
+	// First arg after "tag" is prompt ID
+	// Check if it's a flag instead of a prompt-id
+	if strings.HasPrefix(os.Args[2], "-") {
+		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha>")
+		fmt.Fprintln(os.Stderr, "   or: prov tag <prompt-id> --file <path>")
+		os.Exit(1)
+	}
+
+	promptID := os.Args[2]
+
+	// Parse flags starting from the third argument
+	fs := flag.NewFlagSet("tag", flag.ExitOnError)
+	commitFlag := fs.String("commit", "", "Commit SHA to tag")
+	fileFlag := fs.String("file", "", "File path to tag")
+	fs.Parse(os.Args[3:]) //nolint:errcheck
+
+	// Validate flags
+	if *commitFlag == "" && *fileFlag == "" {
+		fmt.Fprintln(os.Stderr, "Error: Must specify either --commit or --file")
+		os.Exit(1)
+	}
+
+	if *commitFlag != "" && *fileFlag != "" {
+		fmt.Fprintln(os.Stderr, "Error: Cannot specify both --commit and --file (mutually exclusive)")
+		os.Exit(1)
+	}
+
+	db, err := openDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close() //nolint:errcheck
+
+	// Verify prompt exists
+	prompt, err := storage.GetPromptEvent(db, promptID)
+	if err != nil {
+		if err == storage.ErrNotFound {
+			fmt.Fprintf(os.Stderr, "Error: Prompt not found: %s\n", promptID)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: Failed to query prompt: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	// Create manual change set
+	changeSet := &storage.ChangeSet{
+		ID:                fmt.Sprintf("cs-%d-%s", time.Now().UnixNano(), promptID[:8]),
+		PromptID:          promptID,
+		SessionID:         prompt.SessionID,
+		Timestamp:         time.Now(),
+		CorrelationMethod: "manual",
+		Confidence:        1.0,
+	}
+
+	if *commitFlag != "" {
+		changeSet.CommitIntroduced = *commitFlag
+		changeSet.FilesChanged = []string{} // Empty for commit-only tags
+	} else {
+		changeSet.FilesChanged = []string{*fileFlag}
+		changeSet.CommitIntroduced = "" // Empty for file-only tags
+	}
+
+	if err := storage.CreateChangeSet(db, changeSet); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to create tag: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *commitFlag != "" {
+		fmt.Printf("Tagged prompt %s to commit %s\n", promptID, *commitFlag)
+	} else {
+		fmt.Printf("Tagged prompt %s to file %s\n", promptID, *fileFlag)
+	}
+}
+
+func cmdUntag() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "Usage: prov untag <prompt-id> <commit-sha>")
+		os.Exit(1)
+	}
+
+	promptID := os.Args[2]
+	commitSHA := os.Args[3]
+
+	db, err := openDB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close() //nolint:errcheck
+
+	// Delete the manual tag
+	err = storage.DeleteManualChangeSet(db, promptID, commitSHA)
+	if err != nil {
+		if strings.Contains(err.Error(), "no manual tag found") {
+			fmt.Fprintf(os.Stderr, "Error: No manual tag found for prompt %s and commit %s\n", promptID, commitSHA)
+		} else if strings.Contains(err.Error(), "not a manual tag") {
+			fmt.Fprintf(os.Stderr, "Error: Cannot untag - this is %s\n", err.Error())
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: Failed to untag: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	fmt.Printf("Untagged prompt %s from commit %s\n", promptID, commitSHA)
 }
