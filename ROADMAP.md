@@ -72,14 +72,14 @@ Create an **open-source, agent-agnostic provenance system** for AI-assisted deve
 
 ## Data Model
 
-### Core Schema
+### V2 Schema (Current - Commit Window Architecture)
 
 ```sql
 -- Core event table
 CREATE TABLE prompt_events (
     id TEXT PRIMARY KEY,
     timestamp INTEGER NOT NULL,
-    session_id TEXT NOT NULL,
+    session_id TEXT,                  -- Nullable, no FK (legacy from v1)
 
     -- AI metadata
     agent TEXT NOT NULL,              -- 'claude-code', 'cursor', 'copilot'
@@ -95,7 +95,7 @@ CREATE TABLE prompt_events (
     -- Git context
     repo_path TEXT NOT NULL,
     git_commit TEXT,
-    git_branch TEXT,
+    git_branch TEXT,                  -- Current branch at commit time
     git_dirty BOOLEAN,
     dirty_files TEXT,                 -- JSON array
 
@@ -107,28 +107,38 @@ CREATE TABLE prompt_events (
 
     -- Categorization
     prompt_type TEXT,                 -- 'chat', 'inline', 'edit', 'debug'
-    tools_invoked TEXT,               -- JSON array
-    files_mentioned TEXT              -- JSON array
+    tools_invoked TEXT,               -- JSON array (legacy - use tool_invocations table)
+    files_mentioned TEXT,             -- JSON array
+
+    -- V2: Commit window tracking
+    branch_at_capture TEXT,           -- Branch at prompt submission (immutable)
+    pre_branch_switch BOOLEAN DEFAULT FALSE  -- Prompt before branch switch
 );
 
--- Derived change correlations
-CREATE TABLE change_sets (
+-- V2: Tool invocations (lightweight tracking)
+CREATE TABLE tool_invocations (
     id TEXT PRIMARY KEY,
     prompt_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,          -- 'Read', 'Write', 'Edit', 'Bash', etc.
+    tool_args TEXT,                   -- Lightweight JSON (file paths only)
     timestamp INTEGER NOT NULL,
-
-    files_changed TEXT NOT NULL,      -- JSON array
-    diff_summary TEXT,                -- "+10 -5" style
-    commit_introduced TEXT,
-
-    correlation_method TEXT,          -- 'file_watch' | 'git_hook' | 'manual'
-    confidence REAL,                  -- 0.0 - 1.0
-    time_to_first_change_ms INTEGER,
-
-    FOREIGN KEY (prompt_id) REFERENCES prompt_events(id)
+    FOREIGN KEY (prompt_id) REFERENCES prompt_events(id) ON DELETE CASCADE
 );
 
--- Redaction rules
+-- V2: Commit windows cache (optional, for performance)
+CREATE TABLE commit_windows (
+    id TEXT PRIMARY KEY,
+    repo_path TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    prev_commit TEXT,                 -- NULL for initial commit
+    next_commit TEXT NOT NULL,
+    prev_commit_time INTEGER,
+    next_commit_time INTEGER NOT NULL,
+    prompt_count INTEGER DEFAULT 0,
+    UNIQUE(repo_path, branch, next_commit)
+);
+
+-- Redaction rules (unchanged)
 CREATE TABLE redaction_rules (
     id TEXT PRIMARY KEY,
     pattern TEXT NOT NULL,            -- regex
@@ -136,17 +146,21 @@ CREATE TABLE redaction_rules (
     scope TEXT DEFAULT 'both',        -- 'prompt' | 'response' | 'both'
     enabled BOOLEAN DEFAULT TRUE
 );
-
--- Session metadata
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    start_time INTEGER NOT NULL,
-    end_time INTEGER,
-    repo_path TEXT,
-    total_prompts INTEGER DEFAULT 0,
-    total_tokens INTEGER DEFAULT 0
-);
 ```
+
+### V1 Schema (Removed in Migration 000002)
+
+The following tables were removed in the v2 architecture refactoring:
+
+```sql
+-- REMOVED: Session metadata (no longer needed)
+CREATE TABLE sessions (...);
+
+-- REMOVED: Change sets with confidence scoring (replaced by on-demand queries)
+CREATE TABLE change_sets (...);
+```
+
+**Migration notes**: See "V2 Architecture Refactoring" section above for details on what was removed and why.
 
 ---
 
@@ -566,56 +580,24 @@ Used in: `waitForEvent()`, `waitForSession()`, `waitForEventCount()`
 
 ---
 
-## Phase 1: Shell Hook Integration (Weeks 3-4)
+## Phase 1: Shell Hook Integration (Weeks 3-4) - DEFERRED
 
-**Goal**: Transparent AI tool capture with excellent ergonomics
+**Status**: Deferred in favor of native tool integrations (Claude Code hooks in Phase 2A)
 
-**Design Philosophy**: Shell hook for best UX, but keep modular for fallback options
+**Original Goal**: Transparent AI tool capture via shell hooks
 
-### Deliverables
-- [ ] **Shell hook system**:
-  ```bash
-  # In ~/.bashrc or ~/.zshrc
-  eval "$(prov hook bash)"   # or zsh, fish
-  ```
+**Why deferred**:
+- Claude Code native hooks (Phase 2A) provide better integration
+- Shell hooks add complexity without clear benefit over tool-specific adapters
+- May revisit for CLI-only tools (aider, etc.) in future phases
 
-  - Intercepts configured AI commands transparently
-  - Similar to `atuin`, `direnv`, or `starship` integration
-  - Supports bash, zsh, fish
+### Original Deliverables (for reference)
+- Shell hook system (`eval "$(prov hook bash)"`)
+- Intercepts AI commands transparently
+- Fallback wrapper for difficult cases
+- Pre-configured tool support
 
-- [ ] **Hook behavior**:
-  - Detects AI tool invocations (configurable patterns)
-  - Captures stdin/stdout/stderr
-  - Extracts prompt + response (tool-specific heuristics)
-  - Sends to daemon via Unix socket
-  - Passes through exit codes unchanged
-  - Near-zero latency overhead
-
-- [ ] **Fallback wrapper** (modular design):
-  ```bash
-  # If hooks prove difficult, fall back to:
-  prov exec claude-code "task"
-  # or alias: alias ai='prov exec claude-code'
-  ```
-
-- [ ] **Session-based file tracking**:
-  - Start session on first AI invocation
-  - Watch git status in background (60s after each prompt)
-  - End session on commit OR 30 min timeout
-  - Link all prompts in session to ending commit
-
-- [ ] **Pre-configured tool support**:
-  - `claude-code`
-  - `aider`
-  - `cursor` (CLI if available)
-  - Generic pattern matching for custom tools
-
-### Success Criteria
-- After `eval "$(prov hook bash)"`, AI commands work transparently
-- `prov list` shows captured events with correct session IDs
-- Sessions auto-end on commit with all prompts linked
-- Can disable hook with `prov disable` or env var
-- Fallback wrapper works if hooks fail
+**Current approach**: Focus on native integrations per tool (hooks, extensions, plugins)
 
 ---
 
@@ -821,24 +803,27 @@ Used in: `waitForEvent()`, `waitForSession()`, `waitForEventCount()`
 
 ### Feature Breakdown (Recommended Order)
 
-#### Feature 1: Session Query Commands ✅
-**Goal**: Make sessions queryable and useful
+#### Feature 1: Branch Query Commands (V2 Replacement for Sessions)
+**Goal**: Query prompts by branch and time windows
 
-**Commands:**
+**Commands (to be implemented):**
 ```bash
-prov session list                    # List all sessions
-prov session list --active           # Show only active sessions
-prov session show <id>               # Show session details + all prompts
-prov session end <id>                # Manually end a session
+prov branch list                     # List branches with AI activity
+prov branch show <branch>            # Show all prompts on a branch
+prov branch stats <branch>           # Token usage, file activity per branch
+prov window show <commit>            # Show commit window details
 ```
 
 **Database work:**
-- Queries on existing `sessions` and `prompt_events` tables
-- No schema changes needed
+- Queries on `prompt_events` using `branch_at_capture`
+- Filter by `pre_branch_switch` flag
+- Join with `commit_windows` cache if available
 
-**Value**: Understand what sessions exist, when they started/ended, what happened in them
+**Value**: Understand AI work per feature branch, track branch-level costs
 
-**Estimated complexity**: Low (mostly SQL queries + formatting)
+**Estimated complexity**: Low-Medium (SQL queries + git integration)
+
+**Status**: Pending (Day 2-3 work)
 
 ---
 
@@ -927,113 +912,111 @@ prov export --output report.json     # Write to file instead of stdout
 
 ---
 
-#### Feature 4: Git Post-Commit Hook (The Big One) ✅ COMPLETE
-**Goal**: Automatically link prompts to commits
+#### Feature 4: Git Post-Commit Hook (V2 - Commit Windows) - IN PROGRESS
+**Goal**: Cache commit windows for faster blame queries
 
-**Storage layer implementation** (COMPLETE):
+**V2 Implementation** (Day 1 Complete, Days 2-4 Pending):
+
+**Storage layer** (COMPLETE - Day 1):
 ```go
-// Change set management
-func CreateChangeSet(db *sql.DB, cs *ChangeSet) error
-func GetChangeSet(db *sql.DB, id string) (*ChangeSet, error)
-func GetChangeSetsForPrompt(db *sql.DB, promptID string) ([]*ChangeSet, error)
-func GetChangeSetsForCommit(db *sql.DB, commitSHA string) ([]*ChangeSet, error)
+// Commit window caching
+func CreateCommitWindow(db *sql.DB, cw *CommitWindow) error
+func GetCommitWindowForCommit(db *sql.DB, repoPath, branch, commitSHA string) (*CommitWindow, error)
+func ListCommitWindows(db *sql.DB, repoPath, branch string) ([]*CommitWindow, error)
+func UpdateCommitWindowPromptCount(db *sql.DB, id string, promptCount int) error
 ```
 
-**Correlation logic** (COMPLETE):
+**Query layer** (PENDING - Day 2):
 ```go
-// Confidence scoring algorithms
-func CalculateTimeConfidence(promptTime, commitTime time.Time) float64
-func CalculateFileOverlapConfidence(filesMentioned, filesChanged []string) float64
-func CombineConfidenceFactors(timeConf, fileConf float64) float64
-func CorrelateCommitToPrompts(db *sql.DB, commitInfo *CommitInfo, timeWindow time.Duration) ([]*ChangeSet, error)
+// On-demand commit window queries (no pre-computation)
+func GetPromptsForCommit(db *sql.DB, repoPath, commitSHA, branch string) ([]*PromptEvent, error)
+func GetPromptsForFile(db *sql.DB, repoPath, filePath string) ([]*PromptEvent, error)
+func GetBranchCost(db *sql.DB, repoPath, branch string) (*BranchStats, error)
 ```
 
-**CLI implementation** (COMPLETE):
+**CLI implementation** (PENDING - Day 3):
 ```bash
-prov install-hook post-commit        # Install git hook in current repo
-prov correlate-commit <sha> <repo>   # Manual correlation (called by hook)
-prov hooks status                     # Show git and claude-code hooks
-prov hooks uninstall post-commit      # Remove git hook
+prov blame <commit>                  # Query commit window on-demand
+prov blame --file <path>             # All prompts for file across history
+prov install-hook post-commit        # Optional: cache windows for speed
+prov hooks status                     # Show installed hooks
 ```
 
-**Hook behavior:**
-- Embedded post-commit.sh script with PROV_PATH injection
-- Runs after each commit automatically
-- Finds prompts from last 15 minutes in same repository
-- Creates change_sets with confidence scores
+**Hook behavior (simplified from v1):**
+- Runs after each commit
+- Caches commit window metadata (prev commit, timestamps, prompt count)
+- Optional - queries work without cache by computing from git
 - Never blocks commits (exits 0 even on error)
 
-**Confidence scoring:**
-- **Time decay**: Piecewise function (< 30s: 0.95-1.0, < 2min: 0.85-0.95, < 10min: 0.45-0.70)
-- **File overlap**: Perfect match: 0.975, high (2/3+): 0.75, partial (1/3-2/3): 0.40
-- **Combined**: Weighted average (40% time, 60% file overlap)
-
-**Database work:** ✅
-- change_sets table already existed in schema
-- Foreign key constraints to sessions and prompt_events
-- JSON array support for files_changed
-- Confidence scoring (0.0-1.0 float)
+**Commit window logic (no confidence scoring):**
+- Find previous commit on branch: `git.GetPreviousCommit()`
+- Get timestamps: `git.GetCommitTime()`
+- Query prompts: `WHERE timestamp >= prev AND timestamp <= curr AND branch = X`
+- Exclude abandoned work: `AND pre_branch_switch = FALSE`
 
 **Test coverage:** ✅
-- Storage: 6 tests for change_sets CRUD operations
-- Correlation: 5 test suites, 25+ test cases for scoring algorithms
-- Git hooks: 6 tests (install, uninstall, overwrite, status, error handling)
-- All 137 tests passing
+- Day 1: 29 tests passing (storage, git utilities, migration)
+- Day 2-3: Query layer tests, command tests (pending)
 
-**Value**: **This is the killer feature** - trace code back to AI prompts
+**Value**: **Simpler than v1** - no confidence scoring, queries on-demand, optional caching
 
-**Status**: Complete - Full end-to-end implementation with comprehensive test coverage
+**Status**: Day 1 complete (foundation), Days 2-4 pending (query layer, commands, daemon)
 
 ---
 
-#### Feature 5: Blame/Trace Commands ✅ COMPLETE
+#### Feature 5: Blame/Trace Commands (V2 - Commit Windows) - PENDING
 **Goal**: Reverse lookup - code → prompts
 
-**Commands implemented:**
+**Commands to implement:**
 ```bash
-prov blame <file>                    # Prompts that touched this file
-prov blame <commit>                  # Prompts linked to this commit (full or short SHA)
+prov blame <commit>                  # Prompts in commit window (full or short SHA)
+prov blame --file <path>             # All prompts that touched file (future)
 prov trace <file> --lines 10-20      # Prompts for specific lines (future)
 ```
 
-**Database work:** ✅
-- Query `change_sets` table by commit SHA or file path
-- Join with `prompt_events` for full context
-- Support prefix matching for short commit SHAs
-- Order results by confidence score (highest first)
+**V2 Database approach:**
+- No `change_sets` table (removed in v2)
+- Query commit window on-demand from git + database
+- Match prompts by: timestamp window + branch + exclude pre_branch_switch
+- No confidence scores - all prompts in window are relevant
 
-**CLI implementation:** ✅
-- Command routing for blame with commit/file detection
-- Formatted output with prompt details, confidence scores, and file changes
-- Integration tests (8/8 tests passing)
+**CLI implementation (PENDING - Day 3):**
+- Rewrite `cmdBlame()` for commit window queries
+- Formatted output showing commit window details
+- File blame uses git log to find all commits, then query each window
 
-**Value**: "Who (or what AI) wrote this code?"
+**Value**: "Who (or what AI) wrote this code?" - simpler than v1, no confidence scores
 
-**Estimated complexity**: Medium (depends on Feature 4 completion)
+**Estimated complexity**: Medium (requires Day 2 query layer)
 
-**Status**: Complete - Full blame functionality with comprehensive test coverage (8 test functions, all passing)
+**Status**: PENDING - Depends on Feature 4 (Day 2-3 work)
+
+**V1 Status (deprecated)**: V1 implementation with confidence scoring complete but being replaced
 
 ---
 
-#### Feature 6: Manual Tagging
-**Goal**: User corrections for correlation
+#### Feature 6: Manual Tagging (V2 Approach)
+**Goal**: User corrections for automated branch/window detection
 
-**Commands:**
+**Commands (to be designed):**
 ```bash
-prov tag <prompt-id> --commit <sha>  # Manual association
-prov tag <prompt-id> --file <path>   # Associate with file
-prov untag <prompt-id> <commit>      # Remove association
+prov tag <prompt-id> --commit <sha>  # Force associate prompt with commit
+prov tag <prompt-id> --branch <name> # Correct branch_at_capture
+prov tag <prompt-id> --clear-switch  # Clear pre_branch_switch flag
 ```
 
-**Database work:**
-- Insert into `change_sets` with confidence = 1.0
-- Mark as `correlation_method = 'manual'`
+**V2 Database approach:**
+- Update `branch_at_capture` field directly (no separate table)
+- Toggle `pre_branch_switch` flag if user knows prompt was committed
+- Simple field updates, no correlation scoring
 
-**Value**: Override auto-correlation when it's wrong
+**Value**: Override automated branch tracking when it's wrong (e.g., manual merge commits, complex rebases)
 
-**Estimated complexity**: Low (simple database inserts)
+**Estimated complexity**: Low (UPDATE queries)
 
-**Dependency**: Requires Feature 4 schema
+**Dependency**: Requires understanding v2 commit window queries (Day 2)
+
+**Status**: Design pending - need to understand common edge cases first
 
 ---
 
