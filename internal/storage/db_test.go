@@ -30,8 +30,8 @@ func TestDatabaseSchemaCreation(t *testing.T) {
 
 	tables := []string{
 		"prompt_events",
-		"sessions",
-		"change_sets",
+		"tool_invocations",
+		"commit_windows",
 		"redaction_rules",
 		"schema_migrations", // golang-migrate creates this
 	}
@@ -85,28 +85,30 @@ func TestPromptEventSchema(t *testing.T) {
 	defer db.Close()
 
 	expectedColumns := map[string]bool{
-		"id":              true,
-		"timestamp":       true,
-		"session_id":      true,
-		"agent":           true,
-		"model_version":   true,
-		"prompt_text":     true,
-		"response_text":   true,
-		"tokens_in":       true,
-		"tokens_out":      true,
-		"latency_ms":      true,
-		"repo_path":       true,
-		"git_commit":      true,
-		"git_branch":      true,
-		"git_dirty":       true,
-		"dirty_files":     true,
-		"author":          true,
-		"ide":             true,
-		"active_file":     true,
-		"workspace_files": true,
-		"prompt_type":     true,
-		"tools_invoked":   true,
-		"files_mentioned": true,
+		"id":                 true,
+		"timestamp":          true,
+		"session_id":         true, // Nullable, legacy from v1
+		"agent":              true,
+		"model_version":      true,
+		"prompt_text":        true,
+		"response_text":      true,
+		"tokens_in":          true,
+		"tokens_out":         true,
+		"latency_ms":         true,
+		"repo_path":          true,
+		"git_commit":         true,
+		"git_branch":         true,
+		"git_dirty":          true,
+		"dirty_files":        true,
+		"author":             true,
+		"ide":                true,
+		"active_file":        true,
+		"workspace_files":    true,
+		"prompt_type":        true,
+		"tools_invoked":      true,
+		"files_mentioned":    true,
+		"branch_at_capture":  true, // V2: Branch at prompt submission
+		"pre_branch_switch":  true, // V2: Flag for branch switch detection
 	}
 
 	columns := getTableColumns(t, db, "prompt_events")
@@ -117,7 +119,8 @@ func TestPromptEventSchema(t *testing.T) {
 	}
 }
 
-func TestSessionsSchema(t *testing.T) {
+// V2: Tool invocations schema test
+func TestToolInvocationsSchema(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "provenance-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -133,19 +136,52 @@ func TestSessionsSchema(t *testing.T) {
 	defer db.Close()
 
 	expectedColumns := map[string]bool{
-		"id":            true,
-		"start_time":    true,
-		"end_time":      true,
-		"repo_path":     true,
-		"total_prompts": true,
-		"total_tokens":  true,
-		"ended_by":      true,
+		"id":         true,
+		"prompt_id":  true,
+		"tool_name":  true,
+		"tool_args":  true,
+		"timestamp":  true,
 	}
 
-	columns := getTableColumns(t, db, "sessions")
+	columns := getTableColumns(t, db, "tool_invocations")
 	for col := range expectedColumns {
 		if !contains(columns, col) {
-			t.Errorf("Column %s missing from sessions table", col)
+			t.Errorf("Column %s missing from tool_invocations table", col)
+		}
+	}
+}
+
+// V2: Commit windows schema test
+func TestCommitWindowsSchema(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "provenance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := InitDatabase(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
+
+	expectedColumns := map[string]bool{
+		"id":               true,
+		"repo_path":        true,
+		"branch":           true,
+		"prev_commit":      true,
+		"next_commit":      true,
+		"prev_commit_time": true,
+		"next_commit_time": true,
+		"prompt_count":     true,
+	}
+
+	columns := getTableColumns(t, db, "commit_windows")
+	for col := range expectedColumns {
+		if !contains(columns, col) {
+			t.Errorf("Column %s missing from commit_windows table", col)
 		}
 	}
 }
@@ -230,7 +266,10 @@ func TestDatabaseInitFromAnyDirectory(t *testing.T) {
 	if !tableExists(t, db, "prompt_events") {
 		t.Error("Database tables not created - migrations likely didn't run")
 	}
-	if !tableExists(t, db, "sessions") {
-		t.Error("Sessions table not created - migrations likely didn't run")
+	if !tableExists(t, db, "tool_invocations") {
+		t.Error("tool_invocations table not created - migrations likely didn't run")
+	}
+	if !tableExists(t, db, "commit_windows") {
+		t.Error("commit_windows table not created - migrations likely didn't run")
 	}
 }
