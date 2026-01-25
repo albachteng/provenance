@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestInstallHooksClaudeCode tests installing Claude Code hooks
@@ -166,7 +167,14 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() {
+		runCLI(t, "daemon", "stop")
+		// Give daemon time to fully shutdown and clean up
+		time.Sleep(200 * time.Millisecond)
+		// Ensure socket is removed
+		socketPath := filepath.Join(tmpDir, "daemon.sock")
+		os.Remove(socketPath)
+	}()
 
 	waitForDaemonReady(t, tmpDir)
 
@@ -240,7 +248,14 @@ func TestCaptureHookToolUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() {
+		runCLI(t, "daemon", "stop")
+		// Give daemon time to fully shutdown and clean up
+		time.Sleep(200 * time.Millisecond)
+		// Ensure socket is removed
+		socketPath := filepath.Join(tmpDir, "daemon.sock")
+		os.Remove(socketPath)
+	}()
 
 	waitForDaemonReady(t, tmpDir)
 
@@ -338,7 +353,7 @@ func TestHooksStatus(t *testing.T) {
 	}
 }
 
-// TestHooksStatusNoHooks tests status when no hooks are installed
+// TestHooksStatusNoHooks tests status when no Claude Code hooks are installed
 func TestHooksStatusNoHooks(t *testing.T) {
 	setupTestEnv(t)
 
@@ -347,8 +362,10 @@ func TestHooksStatusNoHooks(t *testing.T) {
 		t.Fatalf("hooks status failed: %v", err)
 	}
 
-	if !strings.Contains(output, "No hooks installed") {
-		t.Errorf("Expected 'No hooks installed' message, got: %s", output)
+	// Should either say "No hooks installed" or show only git hooks (if running in a git repo)
+	// but should NOT show claude-code hooks
+	if strings.Contains(output, "claude-code:") {
+		t.Errorf("Expected no Claude Code hooks, but found them in output: %s", output)
 	}
 }
 

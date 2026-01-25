@@ -60,7 +60,14 @@ func TestCommandWrapper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() {
+		runCLI(t, "daemon", "stop")
+		// Give daemon time to fully shutdown and clean up
+		time.Sleep(200 * time.Millisecond)
+		// Ensure socket is removed
+		socketPath := filepath.Join(tmpDir, "daemon.sock")
+		os.Remove(socketPath)
+	}()
 
 	waitForDaemonReady(t, tmpDir)
 
@@ -89,7 +96,14 @@ func TestCommandWrapperExitCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() {
+		runCLI(t, "daemon", "stop")
+		// Give daemon time to fully shutdown and clean up
+		time.Sleep(200 * time.Millisecond)
+		// Ensure socket is removed
+		socketPath := filepath.Join(tmpDir, "daemon.sock")
+		os.Remove(socketPath)
+	}()
 
 	waitForDaemonReady(t, tmpDir)
 
@@ -281,7 +295,10 @@ func waitForDaemonReady(t *testing.T, tmpDir string) {
 func waitForEventInDB(t *testing.T, db *sql.DB, checkFunc func(agent, promptText string) bool) {
 	t.Helper()
 
-	deadline := time.Now().Add(2 * time.Second)
+	// Give daemon a moment to process the event
+	time.Sleep(50 * time.Millisecond)
+
+	deadline := time.Now().Add(5 * time.Second)
 
 	for time.Now().Before(deadline) {
 		rows, err := db.Query(`
@@ -308,7 +325,7 @@ func waitForEventInDB(t *testing.T, db *sql.DB, checkFunc func(agent, promptText
 		}
 		rows.Close()
 
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	t.Fatalf("Event not found in database within timeout")

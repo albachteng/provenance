@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: ✅ Phase 0 complete - Core foundation with session management and configuration! ✅ Phase 2A complete - Claude Code hooks actively capturing! All prompts and tool invocations automatically logged with intelligent session boundaries. See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 0 complete - Core foundation with session management! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ Phase 4 Features 1-5 complete - Sessions, statistics, export, **git commit correlation** with confidence scoring, and **git blame**! Next: Manual tagging (Feature 6). See `ROADMAP.md` for development plans.
 
 ## Quick Start
 
@@ -75,6 +75,48 @@ This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/s
 
 The hooks are installed globally for your user. Every Claude Code project will automatically capture events to the same database. To view events for a specific project, navigate to that directory and run `./prov list`.
 
+### Link Commits to AI Prompts (Git Correlation)
+
+Automatically correlate your git commits with the AI prompts that generated them:
+
+```bash
+# In your git repository, install the post-commit hook
+./prov install-hook post-commit
+```
+
+The hook automatically:
+- Runs after each commit
+- Finds AI prompts from the last 15 minutes
+- Creates change_sets linking prompts to commits
+- Calculates confidence scores based on timing and file overlap
+
+**Confidence scoring factors:**
+- **Time proximity**: Recent prompts (< 2 min) get higher confidence
+- **File overlap**: Prompts mentioning changed files get higher confidence
+- **Combined score**: Weighted average (40% time, 60% file overlap)
+
+**Check hook status:**
+```bash
+./prov hooks status
+
+# Output:
+# Installed hooks:
+#
+# claude-code:
+#   - claude-prompt.py
+#   - claude-tool-pre.py
+#   - claude-tool-post.py
+#   - claude-session.py
+#
+# git:
+#   - post-commit
+```
+
+**Uninstall git hook:**
+```bash
+./prov hooks uninstall post-commit
+```
+
 **Option 2: Shell Hook (For CLI Tools)**
 
 Add provenance tracking to your shell:
@@ -126,6 +168,88 @@ Once the daemon is running and capturing events, you can query them:
 # Search for prompts containing specific text
 ./prov search "authentication"
 ```
+
+### Trace Commits to AI Prompts (Blame)
+
+Find out which AI prompts led to specific code changes in your repository:
+
+```bash
+# Blame a commit (supports full or short SHA)
+./prov blame abc123def456
+./prov blame abc123  # Short SHA works too
+
+# Blame a file to see all AI prompts that modified it
+./prov blame src/auth.go
+./prov blame internal/handlers/user.go
+```
+
+**Example output:**
+```
+Found 1 prompt(s) that led to changes:
+
+[1] Commit: abc123def456 (Confidence: 0.95 / 95%)
+    Prompt ID: prompt-blame-1
+    Timestamp: 2026-01-15 17:35:11
+    Agent: claude-code
+    Author: testuser
+    Prompt: Implement user authentication
+    Files Changed:
+      - auth.go
+      - auth_test.go
+    Diff: +150 -20
+```
+
+**Use cases:**
+- **Code review**: See which AI prompts generated specific commits
+- **Debugging**: Trace bugs back to the original AI conversation
+- **Learning**: Understand how specific features were built
+- **Audit**: Track AI contributions to your codebase
+- **Documentation**: Link code changes to their requirements/context
+
+**Requirements:**
+- Git repository with `post-commit` hook installed (see "Link Commits to AI Prompts")
+- At least one commit made after installing the hook
+
+### Export Session Data
+
+Export your AI interaction data to CSV or JSON for analysis, reporting, or integration with other tools:
+
+```bash
+# Export all events as JSON (default format, prints to stdout)
+./prov export
+
+# Export as CSV
+./prov export --format csv
+
+# Export to a file
+./prov export --format json --output sessions.json
+./prov export --format csv --output sessions.csv
+
+# Export a specific session
+./prov export --session <session-id> --output session.json
+
+# Export events from the last 7 days
+./prov export --since "7 days ago" --format csv --output recent.csv
+
+# Export events from the last 24 hours
+./prov export --since "24 hours ago" --format json
+```
+
+**Export options:**
+- `--format`: Output format (`json` or `csv`, defaults to `json`)
+- `--output`: Write to file instead of stdout
+- `--session`: Export only events from a specific session ID
+- `--since`: Export events since a relative time (e.g., "7 days ago", "2 hours ago")
+
+**CSV format includes:**
+- Event metadata (ID, timestamp, session ID, agent, model version)
+- Prompt and response text
+- Token counts and latency metrics
+- Git context (commit, branch, dirty state)
+- Author, IDE, and file information
+- Tools invoked and files mentioned (semicolon-separated)
+
+**JSON format** provides the complete event data structure with all fields and nested arrays.
 
 ### Configuration
 
@@ -200,7 +324,11 @@ go build -o prov ./cmd/prov
 # Install Claude Code hooks (one-time setup)
 ./prov install-hooks claude-code
 
+# Install git correlation hook (in your repository)
+./prov install-hook post-commit
+
 # Now use Claude Code normally - all interactions are captured automatically!
+# When you commit, the hook links commits to your prompts
 
 # View captured events
 ./prov list
@@ -218,6 +346,18 @@ go build -o prov ./cmd/prov
 
 # Search for specific prompts
 ./prov search "authentication"
+
+# Export your session data
+./prov export --format csv --output my-ai-sessions.csv
+./prov export --format json --output my-ai-sessions.json
+
+# After making a commit, blame it to see which prompts generated it
+git add .
+git commit -m "Add authentication feature"
+./prov blame HEAD  # or use the commit SHA
+
+# Blame a specific file to see its AI history
+./prov blame src/auth.go
 ```
 
 ### With CLI Tools

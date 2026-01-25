@@ -38,10 +38,14 @@ func main() {
 		cmdWrap()
 	case "install-hooks":
 		cmdInstallHooks()
+	case "install-hook":
+		cmdInstallHook()
 	case "hooks":
 		cmdHooks()
 	case "capture-hook":
 		cmdCaptureHook()
+	case "correlate-commit":
+		cmdCorrelateCommit()
 	case "list":
 		cmdList()
 	case "show":
@@ -52,6 +56,14 @@ func main() {
 		cmdSession()
 	case "stats":
 		cmdStats()
+	case "export":
+		cmdExport()
+	case "blame":
+		cmdBlame()
+	case "tag":
+		cmdTag()
+	case "untag":
+		cmdUntag()
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -82,9 +94,18 @@ func printUsage() {
 	fmt.Println("  stats                Show repository statistics")
 	fmt.Println("  stats --session <id> Show session-specific statistics")
 	fmt.Println("  stats --since <time> Show statistics since a time period")
+	fmt.Println("  export --format json Export data as JSON")
+	fmt.Println("  export --format csv  Export data as CSV")
+	fmt.Println("  export --session <id> Export specific session")
+	fmt.Println("  export --since <time> Export data since a time period")
+	fmt.Println("  export --output <file> Write export to file")
 	fmt.Println("  list                 List recent prompts")
 	fmt.Println("  show <id>            Show prompt details")
 	fmt.Println("  search <query>       Search prompts")
+	fmt.Println("  blame <commit|file>  Show which prompts led to changes in a commit or file")
+	fmt.Println("  tag <prompt-id> --commit <sha>  Manually link prompt to commit")
+	fmt.Println("  tag <prompt-id> --file <path>   Manually link prompt to file")
+	fmt.Println("  untag <prompt-id> <commit>      Remove manual tag")
 	fmt.Println()
 	fmt.Println("Run 'prov <command> --help' for more information")
 }
@@ -274,6 +295,35 @@ func cmdCaptureHook() {
 	if err := captureHook(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error capturing hook: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func cmdInstallHook() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: prov install-hook <hook-type>")
+		fmt.Fprintln(os.Stderr, "Supported hook types: post-commit")
+		os.Exit(1)
+	}
+
+	hookType := os.Args[2]
+	if err := installGitHook(hookType); err != nil {
+		fmt.Fprintf(os.Stderr, "Error installing hook: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdCorrelateCommit() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "Usage: prov correlate-commit <commit-sha> <repo-path>")
+		os.Exit(1)
+	}
+
+	commitSHA := os.Args[2]
+	repoPath := os.Args[3]
+
+	if err := correlateCommit(commitSHA, repoPath); err != nil {
+		// Don't print error - hook should fail silently
+		os.Exit(0)
 	}
 }
 
