@@ -13,11 +13,25 @@ DROP INDEX IF EXISTS idx_prompt_events_branch;
 DROP TABLE IF EXISTS commit_windows;
 DROP TABLE IF EXISTS tool_invocations;
 
--- Remove new columns from prompt_events
--- SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
--- This is a simplified approach - actual rollback should preserve existing data
+-- Restore FK constraint to sessions table
+-- SQLite requires recreating the table to add FK constraints
+PRAGMA foreign_keys=OFF;
 
--- Create temporary table without new columns
+-- Recreate sessions table first (FK target must exist)
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    start_time INTEGER NOT NULL,
+    end_time INTEGER,
+    repo_path TEXT,
+    total_prompts INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    ended_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_repo ON sessions(repo_path);
+CREATE INDEX IF NOT EXISTS idx_sessions_start_time ON sessions(start_time);
+
+-- Create temporary table with FK constraint restored
 CREATE TABLE prompt_events_backup (
     id TEXT PRIMARY KEY,
     timestamp INTEGER NOT NULL,
@@ -40,7 +54,8 @@ CREATE TABLE prompt_events_backup (
     workspace_files TEXT,
     prompt_type TEXT,
     tools_invoked TEXT,
-    files_mentioned TEXT
+    files_mentioned TEXT,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
 -- Copy data (excluding new columns)
@@ -58,24 +73,12 @@ DROP TABLE prompt_events;
 ALTER TABLE prompt_events_backup RENAME TO prompt_events;
 
 -- Recreate original indexes
-CREATE INDEX idx_prompt_events_session ON prompt_events(session_id);
-CREATE INDEX idx_prompt_events_timestamp ON prompt_events(timestamp);
-CREATE INDEX idx_prompt_events_repo ON prompt_events(repo_path);
-CREATE INDEX idx_prompt_events_author ON prompt_events(author);
+CREATE INDEX IF NOT EXISTS idx_prompt_events_session ON prompt_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_prompt_events_timestamp ON prompt_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_prompt_events_repo ON prompt_events(repo_path);
+CREATE INDEX IF NOT EXISTS idx_prompt_events_author ON prompt_events(author);
 
--- Recreate sessions table
-CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    start_time INTEGER NOT NULL,
-    end_time INTEGER,
-    repo_path TEXT,
-    total_prompts INTEGER DEFAULT 0,
-    total_tokens INTEGER DEFAULT 0,
-    ended_by TEXT
-);
-
-CREATE INDEX idx_sessions_repo ON sessions(repo_path);
-CREATE INDEX idx_sessions_start_time ON sessions(start_time);
+PRAGMA foreign_keys=ON;
 
 -- Recreate change_sets table
 CREATE TABLE IF NOT EXISTS change_sets (
@@ -93,6 +96,6 @@ CREATE TABLE IF NOT EXISTS change_sets (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
-CREATE INDEX idx_change_sets_prompt ON change_sets(prompt_id);
-CREATE INDEX idx_change_sets_session ON change_sets(session_id);
-CREATE INDEX idx_change_sets_commit ON change_sets(commit_introduced);
+CREATE INDEX IF NOT EXISTS idx_change_sets_prompt ON change_sets(prompt_id);
+CREATE INDEX IF NOT EXISTS idx_change_sets_session ON change_sets(session_id);
+CREATE INDEX IF NOT EXISTS idx_change_sets_commit ON change_sets(commit_introduced);
