@@ -16,10 +16,8 @@ import (
 	"time"
 
 	"github.com/albachteng/provenance/internal/config"
-	"github.com/albachteng/provenance/internal/correlation"
 	"github.com/albachteng/provenance/internal/daemon"
 	"github.com/albachteng/provenance/internal/git"
-	"github.com/albachteng/provenance/internal/session"
 	"github.com/albachteng/provenance/internal/storage"
 	"gopkg.in/yaml.v3"
 )
@@ -34,9 +32,6 @@ var claudeToolPreTemplate string
 
 //go:embed hooks/claude-tool-post.py
 var claudeToolPostTemplate string
-
-//go:embed hooks/claude-session.py
-var claudeSessionScript string
 
 //go:embed hooks/post-commit.sh
 var postCommitHookTemplate string
@@ -193,15 +188,7 @@ func daemonRun() {
 	}
 	defer os.Remove(cfg.Daemon.PIDFile) //nolint:errcheck
 
-	strategy, err := cfg.CreateSessionStrategy()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
-		os.Exit(1)
-	}
-
-	sessionMgr := session.NewManager(db, strategy)
-
-	daemon, err := daemon.NewDaemon(db, cfg.Daemon.SocketPath, sessionMgr, cfg)
+	daemon, err := daemon.NewDaemon(db, cfg.Daemon.SocketPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create daemon: %v\n", err)
 		os.Exit(1)
@@ -498,39 +485,22 @@ func sendEventToDaemon(agent, promptText string) {
 		author = "unknown"
 	}
 
-	// Get or create a session for this repo
-	sessionID := fmt.Sprintf("session-%s", filepath.Base(repoPath))
-
-	// Send session start event first (on separate connection - daemon reads one message per connection)
-	sessionEvent := struct {
-		Type    string          `json:"type"`
-		Session storage.Session `json:"session"`
-	}{
-		Type: "session_start",
-		Session: storage.Session{
-			ID:        sessionID,
-			StartTime: time.Now(),
-			RepoPath:  repoPath,
-		},
-	}
-	sendMessageToDaemon(socketPath, sessionEvent)
-
-	// Note: No "type" field - daemon routes based on absence of "type"
 	event := storage.PromptEvent{
-		ID:         generateEventID(),
-		Timestamp:  time.Now(),
-		SessionID:  sessionID,
-		Agent:      agent,
-		PromptText: promptText,
-		RepoPath:   repoPath,
-		GitCommit:  gitCommit,
-		GitBranch:  gitBranch,
-		GitDirty:   gitDirty,
-		Author:     author,
-		IDE:        "cli",
+		ID:              generateEventID(),
+		Timestamp:       time.Now(),
+		SessionID:       "", // V2: nullable, not used
+		Agent:           agent,
+		PromptText:      promptText,
+		RepoPath:        repoPath,
+		GitCommit:       gitCommit,
+		GitBranch:       gitBranch,
+		GitDirty:        gitDirty,
+		Author:          author,
+		IDE:             "cli",
+		BranchAtCapture: gitBranch,
+		PreBranchSwitch: false,
 	}
 
-	// Send the prompt event (on separate connection)
 	sendMessageToDaemon(socketPath, event)
 }
 
@@ -577,7 +547,6 @@ func installHooks(agent string) error {
 		"claude-prompt.py":    strings.ReplaceAll(claudePromptTemplate, "{{PROV_PATH}}", provPath),
 		"claude-tool-pre.py":  strings.ReplaceAll(claudeToolPreTemplate, "{{PROV_PATH}}", provPath),
 		"claude-tool-post.py": strings.ReplaceAll(claudeToolPostTemplate, "{{PROV_PATH}}", provPath),
-		"claude-session.py":   claudeSessionScript,
 	}
 
 	for name, content := range scripts {
@@ -676,7 +645,6 @@ func captureHook() error {
 	}
 
 	eventName, _ := hookInput["hook_event_name"].(string)
-	sessionID, _ := hookInput["session_id"].(string)
 	cwd, _ := hookInput["cwd"].(string)
 
 	if cwd == "" {
@@ -719,37 +687,22 @@ func captureHook() error {
 		author = "unknown"
 	}
 
-	if sessionID == "" {
-		sessionID = fmt.Sprintf("session-%s", filepath.Base(cwd))
-	}
-
 	socketPath := getSocketPath()
 
-	sessionEvent := struct {
-		Type    string          `json:"type"`
-		Session storage.Session `json:"session"`
-	}{
-		Type: "session_start",
-		Session: storage.Session{
-			ID:        sessionID,
-			StartTime: time.Now(),
-			RepoPath:  cwd,
-		},
-	}
-	sendMessageToDaemon(socketPath, sessionEvent)
-
 	event := storage.PromptEvent{
-		ID:         generateEventID(),
-		Timestamp:  time.Now(),
-		SessionID:  sessionID,
-		Agent:      "claude-code",
-		PromptText: promptText,
-		RepoPath:   cwd,
-		GitCommit:  gitCommit,
-		GitBranch:  gitBranch,
-		GitDirty:   gitDirty,
-		Author:     author,
-		IDE:        "claude-code",
+		ID:              generateEventID(),
+		Timestamp:       time.Now(),
+		SessionID:       "", // V2: nullable, not used
+		Agent:           "claude-code",
+		PromptText:      promptText,
+		RepoPath:        cwd,
+		GitCommit:       gitCommit,
+		GitBranch:       gitBranch,
+		GitDirty:        gitDirty,
+		Author:          author,
+		IDE:             "claude-code",
+		BranchAtCapture: gitBranch,
+		PreBranchSwitch: false,
 	}
 
 	sendMessageToDaemon(socketPath, event)
@@ -941,80 +894,12 @@ func uninstallGitHook(hookType string) error {
 	return nil
 }
 
-// correlateCommit correlates a commit with recent prompts
+// correlateCommit is a stub for v2 architecture
+// V2 uses commit windows instead of pre-computed correlations
+// Correlation is now done on-demand via blame commands
 func correlateCommit(commitSHA, repoPath string) error {
-	// Get database
-	db, err := openDB()
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close() //nolint:errcheck
-
-	// Get commit information
-	cmd := exec.Command("git", "show", "--format=%ct", "--name-only", "--no-patch", commitSHA)
-	cmd.Dir = repoPath
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get commit info: %w", err)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) < 1 {
-		return fmt.Errorf("invalid git show output")
-	}
-
-	// Parse timestamp
-	timestampStr := lines[0]
-	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
-	if err != nil {
-		return fmt.Errorf("failed to parse commit timestamp: %w", err)
-	}
-
-	// Get files changed
-	cmd = exec.Command("git", "show", "--format=", "--name-only", commitSHA)
-	cmd.Dir = repoPath
-	output, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get changed files: %w", err)
-	}
-
-	filesChanged := []string{}
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			filesChanged = append(filesChanged, line)
-		}
-	}
-
-	// Get diff stats
-	cmd = exec.Command("git", "show", "--format=", "--shortstat", commitSHA)
-	cmd.Dir = repoPath
-	output, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get diff stats: %w", err)
-	}
-	diffSummary := strings.TrimSpace(string(output))
-
-	// Create commit info
-	commitInfo := &correlation.CommitInfo{
-		SHA:          commitSHA,
-		Timestamp:    time.Unix(timestamp, 0),
-		RepoPath:     repoPath,
-		FilesChanged: filesChanged,
-		DiffSummary:  diffSummary,
-	}
-
-	// Correlate with prompts (use 15 minute window by default)
-	timeWindow := 15 * time.Minute
-	changeSets, err := correlation.CorrelateCommitToPrompts(db, commitInfo, timeWindow)
-	if err != nil {
-		return fmt.Errorf("failed to correlate commit: %w", err)
-	}
-
-	if len(changeSets) > 0 {
-		fmt.Printf("Correlated commit %s with %d prompt(s)\n", commitSHA[:8], len(changeSets))
-	}
-
+	// V2: Commit window caching will be implemented later
+	// For now, this is a no-op - blame queries compute associations on-demand
 	return nil
 }
 
@@ -1086,51 +971,20 @@ func configValidate() {
 	}
 
 	fmt.Println("Configuration is valid")
-	fmt.Printf("Active strategy: %s\n", cfg.Session.Strategy)
 	fmt.Printf("Database path: %s\n", cfg.Storage.DBPath)
 	fmt.Printf("Socket path: %s\n", cfg.Daemon.SocketPath)
-
-	strategy, err := cfg.CreateSessionStrategy()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Session strategy: %s\n", strategy.Name())
 }
 
-// Session command implementations
+// Session command implementations (V2: DEPRECATED - sessions removed)
 
 func cmdSession() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: prov session <list|show|end>")
-		os.Exit(1)
-	}
-
-	subcommand := os.Args[2]
-
-	switch subcommand {
-	case "list":
-		sessionList()
-	case "show":
-		if len(os.Args) < 4 {
-			fmt.Fprintln(os.Stderr, "Usage: prov session show <id>")
-			os.Exit(1)
-		}
-		sessionShow(os.Args[3])
-	case "end":
-		if len(os.Args) < 4 {
-			fmt.Fprintln(os.Stderr, "Usage: prov session end <id>")
-			os.Exit(1)
-		}
-		sessionEnd(os.Args[3])
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown session command: %s\n", subcommand)
-		fmt.Fprintln(os.Stderr, "Usage: prov session <list|show|end>")
-		os.Exit(1)
-	}
+	fmt.Fprintln(os.Stderr, "Session commands have been removed in v2 architecture")
+	fmt.Fprintln(os.Stderr, "V2 uses commit windows instead of sessions")
+	fmt.Fprintln(os.Stderr, "Use 'prov blame <commit>' to see prompts for a commit")
+	os.Exit(1)
 }
 
+// sessionList is deprecated in v2
 func sessionList() {
 	activeOnly := false
 	for _, arg := range os.Args[3:] {

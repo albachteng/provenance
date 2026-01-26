@@ -11,18 +11,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/albachteng/provenance/internal/config"
-	"github.com/albachteng/provenance/internal/session"
 	"github.com/albachteng/provenance/internal/storage"
 )
 
 func TestDaemonStartAndBind(t *testing.T) {
-	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
-	defer db.Close()
+	tmpDir, db := setupTestDaemon(t)
+	defer db.Close() //nolint:errcheck
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
+	daemon, err := NewDaemon(db, socketPath)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -42,7 +40,7 @@ func TestDaemonStartAndBind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to daemon socket: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	if err := daemon.Stop(); err != nil {
 		t.Errorf("Failed to stop daemon: %v", err)
@@ -59,46 +57,38 @@ func TestDaemonStartAndBind(t *testing.T) {
 }
 
 func TestDaemonAcceptEvent(t *testing.T) {
-	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
-	defer db.Close()
+	tmpDir, db := setupTestDaemon(t)
+	defer db.Close() //nolint:errcheck
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
+	daemon, err := NewDaemon(db, socketPath)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start()
-	defer daemon.Stop()
+	go daemon.Start() //nolint:errcheck
+	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()
 
-	// Create a test session first (for foreign key constraint)
-	session := &storage.Session{
-		ID:        "test-session-daemon",
-		StartTime: time.Now(),
-		RepoPath:  "/home/user/test",
-	}
-	if err := storage.CreateSession(db, session); err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
 	event := &storage.PromptEvent{
-		ID:         "daemon-event-1",
-		Timestamp:  time.Now(),
-		SessionID:  "test-session-daemon",
-		Agent:      "test-agent",
-		PromptText: "Test prompt from daemon",
-		RepoPath:   "/home/user/test",
-		Author:     "testuser",
+		ID:              "daemon-event-1",
+		Timestamp:       time.Now(),
+		SessionID:       "", // V2: nullable
+		Agent:           "test-agent",
+		PromptText:      "Test prompt from daemon",
+		RepoPath:        "/home/user/test",
+		Author:          "testuser",
+		BranchAtCapture: "main",
+		PreBranchSwitch: false,
 	}
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	encoder := json.NewEncoder(conn)
 	if err := encoder.Encode(event); err != nil {
@@ -113,18 +103,18 @@ func TestDaemonAcceptEvent(t *testing.T) {
 }
 
 func TestDaemonInvalidJSON(t *testing.T) {
-	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
-	defer db.Close()
+	tmpDir, db := setupTestDaemon(t)
+	defer db.Close() //nolint:errcheck
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
+	daemon, err := NewDaemon(db, socketPath)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start()
-	defer daemon.Stop()
+	go daemon.Start() //nolint:errcheck
+	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()
 
@@ -132,7 +122,7 @@ func TestDaemonInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	_, err = conn.Write([]byte("{invalid json}"))
 	if err != nil {
@@ -145,17 +135,17 @@ func TestDaemonInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Error("Daemon crashed on invalid JSON")
 	} else {
-		conn2.Close()
+		_ = conn2.Close()
 	}
 }
 
 func TestDaemonGracefulShutdown(t *testing.T) {
-	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
-	defer db.Close()
+	tmpDir, db := setupTestDaemon(t)
+	defer db.Close() //nolint:errcheck
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
+	daemon, err := NewDaemon(db, socketPath)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
@@ -186,29 +176,20 @@ func TestDaemonGracefulShutdown(t *testing.T) {
 }
 
 func TestDaemonConcurrentEvents(t *testing.T) {
-	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
-	defer db.Close()
+	tmpDir, db := setupTestDaemon(t)
+	defer db.Close() //nolint:errcheck
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
+	daemon, err := NewDaemon(db, socketPath)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start()
-	defer daemon.Stop()
+	go daemon.Start() //nolint:errcheck
+	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()
-
-	session := &storage.Session{
-		ID:        "concurrent-session",
-		StartTime: time.Now(),
-		RepoPath:  "/home/user/concurrent",
-	}
-	if err := storage.CreateSession(db, session); err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
 
 	numEvents := 10
 	var wg sync.WaitGroup
@@ -219,13 +200,15 @@ func TestDaemonConcurrentEvents(t *testing.T) {
 			defer wg.Done()
 
 			event := &storage.PromptEvent{
-				ID:         fmt.Sprintf("concurrent-%d", index),
-				Timestamp:  time.Now(),
-				SessionID:  "concurrent-session",
-				Agent:      "test-agent",
-				PromptText: fmt.Sprintf("Concurrent prompt %d", index),
-				RepoPath:   "/home/user/concurrent",
-				Author:     "testuser",
+				ID:              fmt.Sprintf("concurrent-%d", index),
+				Timestamp:       time.Now(),
+				SessionID:       "", // V2: nullable
+				Agent:           "test-agent",
+				PromptText:      fmt.Sprintf("Concurrent prompt %d", index),
+				RepoPath:        "/home/user/concurrent",
+				Author:          "testuser",
+				BranchAtCapture: "main",
+				PreBranchSwitch: false,
 			}
 
 			conn, err := net.Dial("unix", socketPath)
@@ -233,7 +216,7 @@ func TestDaemonConcurrentEvents(t *testing.T) {
 				t.Errorf("Failed to connect: %v", err)
 				return
 			}
-			defer conn.Close()
+			defer conn.Close() //nolint:errcheck
 
 			encoder := json.NewEncoder(conn)
 			if err := encoder.Encode(event); err != nil {
@@ -244,69 +227,32 @@ func TestDaemonConcurrentEvents(t *testing.T) {
 
 	wg.Wait()
 
-	events := waitForEventCount(t, db, "concurrent-session", numEvents, 2*time.Second)
+	// Wait for all events to be stored
+	time.Sleep(100 * time.Millisecond)
 
-	if len(events) != numEvents {
-		t.Errorf("Expected %d events, got %d", numEvents, len(events))
-	}
-}
-
-func TestDaemonSessionEvent(t *testing.T) {
-	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
-	defer db.Close()
-
-	socketPath := filepath.Join(tmpDir, "test.sock")
-
-	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
-	if err != nil {
-		t.Fatalf("Failed to create daemon: %v", err)
-	}
-
-	go daemon.Start()
-	defer daemon.Stop()
-
-	<-daemon.Ready()
-
-	sessionEvent := &SessionEvent{
-		Type: "session_start",
-		Session: storage.Session{
-			ID:        "daemon-session-1",
-			StartTime: time.Now(),
-			RepoPath:  "/home/user/project",
-		},
-	}
-
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
-	defer conn.Close()
-
-	encoder := json.NewEncoder(conn)
-	if err := encoder.Encode(sessionEvent); err != nil {
-		t.Fatalf("Failed to send session event: %v", err)
-	}
-
-	session := waitForSession(t, db, "/home/user/project", 1*time.Second)
-
-	if session.ID != "daemon-session-1" {
-		t.Errorf("Expected session ID daemon-session-1, got %s", session.ID)
+	// Verify all events were stored
+	for i := 0; i < numEvents; i++ {
+		eventID := fmt.Sprintf("concurrent-%d", i)
+		_, err := storage.GetPromptEvent(db, eventID)
+		if err != nil {
+			t.Errorf("Event %s not found: %v", eventID, err)
+		}
 	}
 }
 
 func TestDaemonMultipleConnections(t *testing.T) {
-	tmpDir, db, sessionMgr, cfg := setupTestDaemon(t)
-	defer db.Close()
+	tmpDir, db := setupTestDaemon(t)
+	defer db.Close() //nolint:errcheck
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
-	daemon, err := NewDaemon(db, socketPath, sessionMgr, cfg)
+	daemon, err := NewDaemon(db, socketPath)
 	if err != nil {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start()
-	defer daemon.Stop()
+	go daemon.Start() //nolint:errcheck
+	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()
 
@@ -331,20 +277,20 @@ func TestDaemonMultipleConnections(t *testing.T) {
 	if err != nil {
 		t.Error("Daemon not responsive after multiple connections")
 	} else {
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 
 // Helper functions
 
-func setupTestDaemon(t *testing.T) (string, *sql.DB, *session.Manager, *config.Config) {
+func setupTestDaemon(t *testing.T) (string, *sql.DB) {
 	t.Helper()
 
 	tmpDir, err := os.MkdirTemp("", "daemon-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	t.Cleanup(func() { os.RemoveAll(tmpDir) }) //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	db, err := storage.InitDatabase(dbPath)
@@ -352,17 +298,7 @@ func setupTestDaemon(t *testing.T) (string, *sql.DB, *session.Manager, *config.C
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	cfg := config.Default()
-	cfg.Daemon.SocketPath = filepath.Join(tmpDir, "test.sock")
-	cfg.Storage.DBPath = dbPath
-
-	strategy, err := cfg.CreateSessionStrategy()
-	if err != nil {
-		t.Fatalf("Failed to create session strategy: %v", err)
-	}
-	sessionMgr := session.NewManager(db, strategy)
-
-	return tmpDir, db, sessionMgr, cfg
+	return tmpDir, db
 }
 
 // waitForEvent polls the database until the event exists or timeout expires
@@ -381,47 +317,5 @@ func waitForEvent(t *testing.T, db *sql.DB, eventID string, timeout time.Duratio
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("Event %s not found within %v timeout", eventID, timeout)
-	return nil
-}
-
-// waitForSession polls the database until the session exists or timeout expires
-func waitForSession(t *testing.T, db *sql.DB, repoPath string, timeout time.Duration) *storage.Session {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		session, err := storage.GetActiveSession(db, repoPath)
-		if err == nil {
-			return session
-		}
-		if err != storage.ErrNotFound {
-			t.Fatalf("Unexpected error querying session: %v", err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("Session for repo %s not found within %v timeout", repoPath, timeout)
-	return nil
-}
-
-// waitForEventCount polls until the expected number of events exist for a session
-func waitForEventCount(t *testing.T, db *sql.DB, sessionID string, expectedCount int, timeout time.Duration) []*storage.PromptEvent {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		events, err := storage.ListPromptEvents(db, sessionID)
-		if err != nil {
-			t.Fatalf("Failed to list events: %v", err)
-		}
-		if len(events) == expectedCount {
-			return events
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// Get current count for better error message
-	events, _ := storage.ListPromptEvents(db, sessionID)
-	t.Fatalf("Expected %d events for session %s, got %d after %v timeout",
-		expectedCount, sessionID, len(events), timeout)
 	return nil
 }
