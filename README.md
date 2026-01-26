@@ -302,8 +302,6 @@ export AI_PROVENANCE_HOME=/custom/path
 ./prov daemon start
 ```
 
-**Note:** Configuration system currently includes legacy session settings from v1 architecture. These are ignored and will be removed in a future update.
-
 ## Try It Out
 
 ### With Claude Code
@@ -347,9 +345,6 @@ go build -o prov ./cmd/prov
 git add .
 git commit -m "Add authentication feature"
 ./prov blame HEAD  # or use the commit SHA
-
-# Blame a specific file to see its AI history
-./prov blame src/auth.go
 ```
 
 ### With CLI Tools
@@ -399,9 +394,9 @@ Each AI interaction captures:
 **Performance:**
 - Prompt capture: < 10ms (immediate write to SQLite)
 - Blame query: 50-100ms (on-demand from git + database)
-- Optional commit window cache for even faster queries
+- No pre-computation needed - simple, fast, real-time queries
 
-See `ROADMAP.md` for architecture details and v2 migration notes.
+See `ROADMAP.md` for architecture details and implementation notes.
 
 ## Development
 
@@ -428,20 +423,20 @@ provenance/
 │   └── hooks/             # Embedded hook scripts (Python)
 ├── internal/
 │   ├── config/            # Configuration system (YAML + env vars)
-│   ├── daemon/            # Unix socket server
+│   ├── daemon/            # Unix socket server (simplified v2)
 │   ├── storage/           # SQLite database layer (v2: commit windows)
 │   │   ├── migrations/    # Schema migrations
-│   │   ├── windows.go     # Commit window cache CRUD
-│   │   └── tool_invocations.go  # Tool tracking
+│   │   ├── events.go      # Prompt event CRUD
+│   │   └── stubs.go       # V1 compatibility stubs (temporary)
+│   ├── queries/           # V2 query layer
+│   │   └── prompts.go     # Commit window queries
 │   └── git/               # Git integration
 │       ├── commits.go     # Commit metadata extraction
 │       ├── blame.go       # Git blame parsing
-│       └── branch.go      # Branch tracking
-├── ROADMAP.md             # Development roadmap and v2 architecture notes
-└── DESIGN.md              # Technical design document
+│       └── testing.go     # Git test helpers
+├── ROADMAP.md             # Development roadmap and architecture
+└── TESTING.md             # Manual testing guide
 ```
-
-**Note:** `internal/session/` and `internal/correlation/` from v1 architecture will be removed in a future cleanup (Day 5).
 
 ## Documentation
 
