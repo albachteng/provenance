@@ -18,6 +18,7 @@ import (
 	"github.com/albachteng/provenance/internal/config"
 	"github.com/albachteng/provenance/internal/daemon"
 	"github.com/albachteng/provenance/internal/git"
+	"github.com/albachteng/provenance/internal/queries"
 	"github.com/albachteng/provenance/internal/storage"
 	"gopkg.in/yaml.v3"
 )
@@ -1618,11 +1619,11 @@ func escapeCSV(field string) string {
 // cmdBlame shows which AI prompts led to changes in a commit or file
 func cmdBlame() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: prov blame <commit-sha|file-path>")
+		fmt.Fprintln(os.Stderr, "Usage: prov blame <commit-sha>")
 		os.Exit(1)
 	}
 
-	target := os.Args[2]
+	commitSHA := os.Args[2]
 
 	db, err := openDB()
 	if err != nil {
@@ -1631,59 +1632,71 @@ func cmdBlame() {
 	}
 	defer db.Close() //nolint:errcheck
 
-	var changeSets []*storage.ChangeSet
-	changeSets, err = storage.GetChangeSetsForCommitPrefix(db, target)
+	// Get current repo path
+	repoPath, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to query change sets: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to get current directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(changeSets) == 0 {
-		changeSets, err = storage.GetChangeSetsForFile(db, target)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to query change sets: %v\n", err)
-			os.Exit(1)
-		}
+	// Get the branch for this commit
+	branch, err := git.GetBranchForCommit(repoPath, commitSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to determine branch for commit: %v\n", err)
+		os.Exit(1)
 	}
 
-	if len(changeSets) == 0 {
-		fmt.Println("No prompts found for this commit or file")
+	// Query prompts in commit window
+	prompts, err := queries.GetPromptsForCommit(db, repoPath, commitSHA, branch)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to query prompts: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(prompts) == 0 {
+		fmt.Println("No prompts found in commit window")
 		return
 	}
 
-	fmt.Printf("Found %d prompt(s) that led to changes:\n\n", len(changeSets))
+	// Get commit time for display
+	commitTime, err := git.GetCommitTime(repoPath, commitSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get commit time: %v\n", err)
+		os.Exit(1)
+	}
 
-	for i, cs := range changeSets {
-		prompt, err := storage.GetPromptEvent(db, cs.PromptID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to get prompt %s: %v\n", cs.PromptID, err)
-			continue
-		}
+	// Get files changed in commit
+	filesChanged, err := git.GetFilesChanged(repoPath, commitSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to get files changed: %v\n", err)
+		filesChanged = []string{}
+	}
 
-		correlationIndicator := ""
-		if cs.CorrelationMethod == "manual" {
-			correlationIndicator = " [manual]"
-		}
+	fmt.Printf("Commit: %s (%s)\n", commitSHA, commitTime.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Branch: %s\n", branch)
+	fmt.Printf("\nFound %d prompt(s) in commit window:\n\n", len(prompts))
 
-		fmt.Printf("[%d] Commit: %s (Confidence: %.2f / %.0f%%)%s\n", i+1, cs.CommitIntroduced, cs.Confidence, cs.Confidence*100, correlationIndicator)
-		fmt.Printf("    Prompt ID: %s\n", prompt.ID)
+	for i, prompt := range prompts {
+		fmt.Printf("[%d] Prompt ID: %s\n", i+1, prompt.ID)
 		fmt.Printf("    Timestamp: %s\n", prompt.Timestamp.Format("2006-01-02 15:04:05"))
 		fmt.Printf("    Agent: %s\n", prompt.Agent)
-		fmt.Printf("    Author: %s\n", prompt.Author)
+		if prompt.Author != "" {
+			fmt.Printf("    Author: %s\n", prompt.Author)
+		}
 		fmt.Printf("    Prompt: %s\n", truncatePrompt(prompt.PromptText, 200))
 
-		if len(cs.FilesChanged) > 0 {
-			fmt.Printf("    Files Changed:\n")
-			for _, file := range cs.FilesChanged {
-				fmt.Printf("      - %s\n", file)
-			}
-		}
-
-		if cs.DiffSummary != "" {
-			fmt.Printf("    Diff: %s\n", cs.DiffSummary)
+		if len(prompt.ToolsInvoked) > 0 {
+			fmt.Printf("    Tools: %v\n", prompt.ToolsInvoked)
 		}
 
 		fmt.Println()
+	}
+
+	if len(filesChanged) > 0 {
+		fmt.Printf("Files changed in commit:\n")
+		for _, file := range filesChanged {
+			fmt.Printf("  - %s\n", file)
+		}
 	}
 }
 

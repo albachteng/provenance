@@ -38,7 +38,7 @@ func TestInstallHooksClaudeCode(t *testing.T) {
 		"claude-prompt.py",
 		"claude-tool-pre.py",
 		"claude-tool-post.py",
-		"claude-session.py",
+		// V2: claude-session.py removed (sessions removed in v2)
 	}
 
 	for _, script := range expectedScripts {
@@ -229,8 +229,9 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 		t.Errorf("Expected prompt text, got: %s", promptText)
 	}
 
-	if sessionID != "ses-test-123" {
-		t.Errorf("Expected session_id 'ses-test-123', got: %s", sessionID)
+	// V2: session_id not used (v2 uses commit windows instead)
+	if sessionID != "" {
+		t.Logf("Note: session_id is '%s' but v2 doesn't use sessions", sessionID)
 	}
 
 	if ide != "claude-code" {
