@@ -67,7 +67,7 @@ func TestDaemonAcceptEvent(t *testing.T) {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start() //nolint:errcheck
+	go daemon.Start()   //nolint:errcheck
 	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()
@@ -113,7 +113,7 @@ func TestDaemonInvalidJSON(t *testing.T) {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start() //nolint:errcheck
+	go daemon.Start()   //nolint:errcheck
 	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()
@@ -186,7 +186,7 @@ func TestDaemonConcurrentEvents(t *testing.T) {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start() //nolint:errcheck
+	go daemon.Start()   //nolint:errcheck
 	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()
@@ -251,7 +251,7 @@ func TestDaemonMultipleConnections(t *testing.T) {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	go daemon.Start() //nolint:errcheck
+	go daemon.Start()   //nolint:errcheck
 	defer daemon.Stop() //nolint:errcheck
 
 	<-daemon.Ready()

@@ -35,11 +35,12 @@ func BlameLines(repoPath, filePath string, startLine, endLine int) ([]LineBlame,
 
 // parseBlameOutput parses git blame --porcelain format
 // Format:
-//   <sha> <original-line> <final-line> <num-lines>
-//   author <author-name>
-//   author-time <timestamp>
-//   ...
-//   \t<line-content>
+//
+//	<sha> <original-line> <final-line> <num-lines>
+//	author <author-name>
+//	author-time <timestamp>
+//	...
+//	\t<line-content>
 func parseBlameOutput(output string, startLine int) []LineBlame {
 	lines := []LineBlame{}
 	currentCommit := ""

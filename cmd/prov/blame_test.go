@@ -87,7 +87,7 @@ func TestBlameCommit(t *testing.T) {
 
 	// Change to repo directory for blame command
 	originalDir, _ := os.Getwd()
-	os.Chdir(repoPath) //nolint:errcheck
+	os.Chdir(repoPath)          //nolint:errcheck
 	defer os.Chdir(originalDir) //nolint:errcheck
 
 	// Run blame command
@@ -161,7 +161,7 @@ func TestBlameCommitNoMatches(t *testing.T) {
 
 	// Change to repo directory for blame command
 	originalDir, _ := os.Getwd()
-	os.Chdir(repoPath) //nolint:errcheck
+	os.Chdir(repoPath)          //nolint:errcheck
 	defer os.Chdir(originalDir) //nolint:errcheck
 
 	// Run blame command
@@ -250,7 +250,7 @@ func TestBlameCommitBranchFiltering(t *testing.T) {
 
 	// Change to repo directory for blame command
 	originalDir, _ := os.Getwd()
-	os.Chdir(repoPath) //nolint:errcheck
+	os.Chdir(repoPath)          //nolint:errcheck
 	defer os.Chdir(originalDir) //nolint:errcheck
 
 	// Run blame command
@@ -345,7 +345,7 @@ func TestBlameCommitPreBranchSwitchExcluded(t *testing.T) {
 
 	// Change to repo directory for blame command
 	originalDir, _ := os.Getwd()
-	os.Chdir(repoPath) //nolint:errcheck
+	os.Chdir(repoPath)          //nolint:errcheck
 	defer os.Chdir(originalDir) //nolint:errcheck
 
 	// Run blame command
@@ -413,7 +413,7 @@ func TestBlameInitialCommit(t *testing.T) {
 
 	// Change to repo directory for blame command
 	originalDir, _ := os.Getwd()
-	os.Chdir(repoPath) //nolint:errcheck
+	os.Chdir(repoPath)          //nolint:errcheck
 	defer os.Chdir(originalDir) //nolint:errcheck
 
 	// Run blame command

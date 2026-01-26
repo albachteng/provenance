@@ -85,30 +85,30 @@ func TestPromptEventSchema(t *testing.T) {
 	defer db.Close()
 
 	expectedColumns := map[string]bool{
-		"id":                 true,
-		"timestamp":          true,
-		"session_id":         true, // Nullable, legacy from v1
-		"agent":              true,
-		"model_version":      true,
-		"prompt_text":        true,
-		"response_text":      true,
-		"tokens_in":          true,
-		"tokens_out":         true,
-		"latency_ms":         true,
-		"repo_path":          true,
-		"git_commit":         true,
-		"git_branch":         true,
-		"git_dirty":          true,
-		"dirty_files":        true,
-		"author":             true,
-		"ide":                true,
-		"active_file":        true,
-		"workspace_files":    true,
-		"prompt_type":        true,
-		"tools_invoked":      true,
-		"files_mentioned":    true,
-		"branch_at_capture":  true, // V2: Branch at prompt submission
-		"pre_branch_switch":  true, // V2: Flag for branch switch detection
+		"id":                true,
+		"timestamp":         true,
+		"session_id":        true, // Nullable, legacy from v1
+		"agent":             true,
+		"model_version":     true,
+		"prompt_text":       true,
+		"response_text":     true,
+		"tokens_in":         true,
+		"tokens_out":        true,
+		"latency_ms":        true,
+		"repo_path":         true,
+		"git_commit":        true,
+		"git_branch":        true,
+		"git_dirty":         true,
+		"dirty_files":       true,
+		"author":            true,
+		"ide":               true,
+		"active_file":       true,
+		"workspace_files":   true,
+		"prompt_type":       true,
+		"tools_invoked":     true,
+		"files_mentioned":   true,
+		"branch_at_capture": true, // V2: Branch at prompt submission
+		"pre_branch_switch": true, // V2: Flag for branch switch detection
 	}
 
 	columns := getTableColumns(t, db, "prompt_events")
@@ -136,11 +136,11 @@ func TestToolInvocationsSchema(t *testing.T) {
 	defer db.Close()
 
 	expectedColumns := map[string]bool{
-		"id":         true,
-		"prompt_id":  true,
-		"tool_name":  true,
-		"tool_args":  true,
-		"timestamp":  true,
+		"id":        true,
+		"prompt_id": true,
+		"tool_name": true,
+		"tool_args": true,
+		"timestamp": true,
 	}
 
 	columns := getTableColumns(t, db, "tool_invocations")

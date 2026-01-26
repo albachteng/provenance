@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: ✅ Phase 0 complete - Core foundation! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ V2 Architecture - Migrated to **commit window-based** design (simpler, faster). Day 1 complete: schema migration, git utilities, storage layer, 29 tests passing. Next: Query layer (Day 2). See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 0 complete - Core foundation! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ **V2 Architecture complete** - Migrated to commit window-based design (simpler, faster). Blame command uses real-time git queries. All tests passing. See `ROADMAP.md` for architecture details.
 
 ## Quick Start
 
@@ -63,7 +63,6 @@ This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/s
 #   - claude-prompt.py
 #   - claude-tool-pre.py
 #   - claude-tool-post.py
-#   - claude-session.py
 ```
 
 **Uninstall (if needed):**
@@ -159,12 +158,13 @@ Once the daemon is running and capturing events, you can query them:
 Find out which AI prompts led to specific code changes in your repository:
 
 ```bash
-# Blame a commit (supports full or short SHA)
+# Blame a commit (supports full SHA)
 ./prov blame abc123def456
-./prov blame abc123  # Short SHA works too
 
-# Blame a file to see all AI prompts that modified it (future)
-./prov blame src/auth.go
+# Must be run from within the git repository
+cd /path/to/your/repo
+./prov blame HEAD
+./prov blame HEAD~1
 ```
 
 **Example output:**
@@ -246,8 +246,6 @@ Export your AI interaction data to CSV or JSON for analysis, reporting, or integ
 - Tools invoked and files mentioned (semicolon-separated)
 
 **JSON format** provides the complete event data structure with all fields and nested arrays.
-
-**Note:** Export currently includes legacy `session_id` field (nullable) from v1 architecture. This field will be removed in a future update.
 
 ### Configuration
 

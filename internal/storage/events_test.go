@@ -35,11 +35,11 @@ func TestStorePromptEvent(t *testing.T) {
 			"src/auth.go",
 			"src/main.go",
 		},
-		PromptType:       "chat",
-		ToolsInvoked:     []string{"read_file", "write_file"},
-		FilesMentioned:   []string{"src/auth.go"},
-		BranchAtCapture:  "main", // V2: branch at prompt submission
-		PreBranchSwitch:  false,  // V2: not before branch switch
+		PromptType:      "chat",
+		ToolsInvoked:    []string{"read_file", "write_file"},
+		FilesMentioned:  []string{"src/auth.go"},
+		BranchAtCapture: "main", // V2: branch at prompt submission
+		PreBranchSwitch: false,  // V2: not before branch switch
 	}
 
 	err := StorePromptEvent(db, event)
