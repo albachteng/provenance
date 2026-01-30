@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "Failed to create temp dir: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck
 
 	testBinary = filepath.Join(tmpDir, "prov-test")
 	cmd := exec.Command("go", "build", "-o", testBinary, ".")
@@ -64,7 +64,7 @@ func TestCLIDaemonStart(t *testing.T) {
 		t.Error("Daemon socket file not created")
 	}
 
-	runCLI(t, "daemon", "stop")
+	runCLI(t, "daemon", "stop") //nolint:errcheck
 }
 
 func TestCLIDaemonStop(t *testing.T) {
@@ -103,7 +103,7 @@ func TestCLIDaemonStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer runCLI(t, "daemon", "stop") //nolint:errcheck
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -120,7 +120,7 @@ func TestCLIDaemonStatus(t *testing.T) {
 func TestCLIList(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	sessionID := "test-session-cli"
 	createTestSession(t, db, sessionID)
@@ -148,7 +148,7 @@ func TestCLIList(t *testing.T) {
 func TestCLIListLimit(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	sessionID := "test-session-limit"
 	createTestSession(t, db, sessionID)
@@ -181,7 +181,7 @@ func TestCLIListLimit(t *testing.T) {
 func TestCLIShow(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	sessionID := "test-session-show"
 	createTestSession(t, db, sessionID)
@@ -222,7 +222,7 @@ func TestCLIShowNotFound(t *testing.T) {
 func TestCLISearch(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	sessionID := "test-session-search"
 	createTestSession(t, db, sessionID)
@@ -257,11 +257,11 @@ func setupTestEnv(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	t.Cleanup(func() { os.RemoveAll(tmpDir) }) //nolint:errcheck
 
 	// Set environment variables for CLI to use test directory
-	os.Setenv("AI_PROVENANCE_HOME", tmpDir)
-	t.Cleanup(func() { os.Unsetenv("AI_PROVENANCE_HOME") })
+	os.Setenv("AI_PROVENANCE_HOME", tmpDir)                 //nolint:errcheck
+	t.Cleanup(func() { os.Unsetenv("AI_PROVENANCE_HOME") }) //nolint:errcheck
 
 	return tmpDir
 }
@@ -334,14 +334,6 @@ func TestCLISessionListTableAlignment(t *testing.T) {
 	t.Skip("V2: Session commands removed - v2 uses commit windows instead of sessions")
 }
 
-// abs returns the absolute value of x
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
 func TestCLIStatsRepo(t *testing.T) {
 	t.Skip("V2: Stats command updated - session-based stats replaced with commit-based stats")
 }
@@ -357,7 +349,7 @@ func TestCLIStatsSince(t *testing.T) {
 func TestCLIStatsNoData(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
@@ -367,7 +359,7 @@ func TestCLIStatsNoData(t *testing.T) {
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("Failed to change directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer os.Chdir(originalDir) //nolint:errcheck
 
 	output, err := runCLI(t, "stats")
 	if err != nil {
@@ -382,7 +374,7 @@ func TestCLIStatsNoData(t *testing.T) {
 func TestCLIExportJSON(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath := tmpDir
 	now := time.Now()
@@ -465,7 +457,7 @@ func TestCLIExportJSON(t *testing.T) {
 func TestCLIExportCSV(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath := tmpDir
 	now := time.Now()
@@ -527,7 +519,7 @@ func TestCLIExportCSV(t *testing.T) {
 func TestCLIExportSession(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath := tmpDir
 	now := time.Now()
@@ -608,7 +600,7 @@ func TestCLIExportSession(t *testing.T) {
 func TestCLIExportSince(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath := tmpDir
 	now := time.Now()
@@ -681,7 +673,7 @@ func TestCLIExportSince(t *testing.T) {
 func TestCLIExportToFile(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	repoPath := tmpDir
 	now := time.Now()
@@ -749,7 +741,7 @@ func TestCLIExportToFile(t *testing.T) {
 func TestCLIExportNoData(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	output, err := runCLI(t, "export", "--format", "json")
 	if err != nil {
