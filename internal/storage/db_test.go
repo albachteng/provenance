@@ -14,7 +14,7 @@ func TestDatabaseSchemaCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -22,7 +22,7 @@ func TestDatabaseSchemaCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		t.Fatal("Database file was not created")
@@ -48,7 +48,7 @@ func TestDatabaseWALMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -56,7 +56,7 @@ func TestDatabaseWALMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	var journalMode string
 	err = db.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
@@ -74,7 +74,7 @@ func TestPromptEventSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -82,7 +82,7 @@ func TestPromptEventSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	expectedColumns := map[string]bool{
 		"id":                true,
@@ -125,7 +125,7 @@ func TestToolInvocationsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -133,7 +133,7 @@ func TestToolInvocationsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	expectedColumns := map[string]bool{
 		"id":        true,
@@ -157,7 +157,7 @@ func TestCommitWindowsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -165,7 +165,7 @@ func TestCommitWindowsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	expectedColumns := map[string]bool{
 		"id":               true,
@@ -202,7 +202,7 @@ func getTableColumns(t *testing.T, db *sql.DB, tableName string) []string {
 	if err != nil {
 		t.Fatalf("Failed to get table info for %s: %v", tableName, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() //nolint:errcheck
 
 	var columns []string
 	for rows.Next() {
@@ -238,13 +238,13 @@ func TestDatabaseInitFromAnyDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	workDir, err := os.MkdirTemp("", "provenance-work-*")
 	if err != nil {
 		t.Fatalf("Failed to create work dir: %v", err)
 	}
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }() //nolint:errcheck
 
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -254,14 +254,14 @@ func TestDatabaseInitFromAnyDirectory(t *testing.T) {
 	if err := os.Chdir(workDir); err != nil {
 		t.Fatalf("Failed to change directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() { _ = os.Chdir(originalDir) }() //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	db, err := InitDatabase(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to initialize database from different directory: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	if !tableExists(t, db, "prompt_events") {
 		t.Error("Database tables not created - migrations likely didn't run")

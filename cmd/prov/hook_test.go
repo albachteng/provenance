@@ -54,19 +54,19 @@ func TestHookUnsupportedShell(t *testing.T) {
 func TestCommandWrapper(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	_, err := runCLI(t, "daemon", "start")
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
 	defer func() {
-		runCLI(t, "daemon", "stop")
+		_, _ = runCLI(t, "daemon", "stop") //nolint:errcheck
 		// Give daemon time to fully shutdown and clean up
 		time.Sleep(200 * time.Millisecond)
 		// Ensure socket is removed
 		socketPath := filepath.Join(tmpDir, "daemon.sock")
-		os.Remove(socketPath)
+		_ = os.Remove(socketPath) //nolint:errcheck
 	}()
 
 	waitForDaemonReady(t, tmpDir)
@@ -97,12 +97,12 @@ func TestCommandWrapperExitCode(t *testing.T) {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
 	defer func() {
-		runCLI(t, "daemon", "stop")
+		_, _ = runCLI(t, "daemon", "stop") //nolint:errcheck
 		// Give daemon time to fully shutdown and clean up
 		time.Sleep(200 * time.Millisecond)
 		// Ensure socket is removed
 		socketPath := filepath.Join(tmpDir, "daemon.sock")
-		os.Remove(socketPath)
+		_ = os.Remove(socketPath) //nolint:errcheck
 	}()
 
 	waitForDaemonReady(t, tmpDir)
@@ -122,7 +122,7 @@ func TestSessionCreation(t *testing.T) {
 
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	gitDir := filepath.Join(tmpDir, "test-repo")
 	if err := os.MkdirAll(gitDir, 0755); err != nil {
@@ -140,7 +140,7 @@ func TestSessionCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() { _, _ = runCLI(t, "daemon", "stop") }() //nolint:errcheck
 
 	waitForDaemonReady(t, tmpDir)
 
@@ -160,7 +160,7 @@ func TestSessionCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query sessions: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() //nolint:errcheck
 
 	if !rows.Next() {
 		t.Fatal("Expected session to be created")
@@ -187,7 +187,7 @@ func TestSessionLinking(t *testing.T) {
 
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	gitDir := filepath.Join(tmpDir, "test-repo")
 	if err := os.MkdirAll(gitDir, 0755); err != nil {
@@ -205,12 +205,12 @@ func TestSessionLinking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
-	defer runCLI(t, "daemon", "stop")
+	defer func() { _, _ = runCLI(t, "daemon", "stop") }() //nolint:errcheck
 
 	waitForDaemonReady(t, tmpDir)
 
-	runCLI(t, "wrap", "claude-code", "echo", "first prompt")
-	runCLI(t, "wrap", "claude-code", "echo", "second prompt")
+	_, _ = runCLI(t, "wrap", "claude-code", "echo", "first prompt") //nolint:errcheck
+	_, _ = runCLI(t, "wrap", "claude-code", "echo", "second prompt") //nolint:errcheck
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -230,7 +230,7 @@ func TestSessionLinking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query events: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() //nolint:errcheck
 
 	sessionIDs := make(map[string]int)
 	for rows.Next() {
@@ -314,16 +314,16 @@ func waitForEventInDB(t *testing.T, db *sql.DB, checkFunc func(agent, promptText
 		for rows.Next() {
 			var agent, promptText string
 			if err := rows.Scan(&agent, &promptText); err != nil {
-				rows.Close()
+				_ = rows.Close() //nolint:errcheck
 				t.Fatalf("Failed to scan row: %v", err)
 			}
 
 			if checkFunc(agent, promptText) {
-				rows.Close()
+				_ = rows.Close() //nolint:errcheck
 				return
 			}
 		}
-		rows.Close()
+		_ = rows.Close() //nolint:errcheck
 
 		time.Sleep(50 * time.Millisecond)
 	}

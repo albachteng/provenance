@@ -112,8 +112,8 @@ func TestPostCommitHookExecution(t *testing.T) {
 
 	// Start daemon for this test
 	tmpDir := t.TempDir()
-	os.Setenv("AI_PROVENANCE_HOME", tmpDir)
-	defer os.Unsetenv("AI_PROVENANCE_HOME")
+	_ = os.Setenv("AI_PROVENANCE_HOME", tmpDir) //nolint:errcheck
+	defer func() { _ = os.Unsetenv("AI_PROVENANCE_HOME") }() //nolint:errcheck
 
 	// Create test repo
 	repoPath := setupGitRepo(t)
@@ -139,7 +139,7 @@ func TestPostCommitHookExecution(t *testing.T) {
 	defer func() {
 		cmd := exec.Command(provPath, "daemon", "stop")
 		cmd.Env = append(os.Environ(), "AI_PROVENANCE_HOME="+tmpDir)
-		cmd.Run()
+		_ = cmd.Run() //nolint:errcheck
 	}()
 
 	// Create a prompt event (so hook has something to correlate)

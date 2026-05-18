@@ -226,7 +226,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) }) //nolint:errcheck
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	db, err := InitDatabase(dbPath)

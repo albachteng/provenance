@@ -21,8 +21,8 @@ func TestInstallHooksClaudeCode(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	output, err := runCLI(t, "install-hooks", "claude-code")
 	if err != nil {
@@ -121,8 +121,8 @@ func TestInstallHooksExistingSettings(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	output, err := runCLI(t, "install-hooks", "claude-code")
 	if err != nil {
@@ -161,19 +161,19 @@ func TestInstallHooksExistingSettings(t *testing.T) {
 func TestCaptureHookUserPrompt(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	_, err := runCLI(t, "daemon", "start")
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
 	defer func() {
-		runCLI(t, "daemon", "stop")
+		_, _ = runCLI(t, "daemon", "stop") //nolint:errcheck
 		// Give daemon time to fully shutdown and clean up
 		time.Sleep(200 * time.Millisecond)
 		// Ensure socket is removed
 		socketPath := filepath.Join(tmpDir, "daemon.sock")
-		os.Remove(socketPath)
+		_ = os.Remove(socketPath) //nolint:errcheck
 	}()
 
 	waitForDaemonReady(t, tmpDir)
@@ -210,7 +210,7 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query events: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() //nolint:errcheck
 
 	if !rows.Next() {
 		t.Fatal("Expected event in database")
@@ -243,19 +243,19 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 func TestCaptureHookToolUse(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	_, err := runCLI(t, "daemon", "start")
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
 	defer func() {
-		runCLI(t, "daemon", "stop")
+		_, _ = runCLI(t, "daemon", "stop") //nolint:errcheck
 		// Give daemon time to fully shutdown and clean up
 		time.Sleep(200 * time.Millisecond)
 		// Ensure socket is removed
 		socketPath := filepath.Join(tmpDir, "daemon.sock")
-		os.Remove(socketPath)
+		_ = os.Remove(socketPath) //nolint:errcheck
 	}()
 
 	waitForDaemonReady(t, tmpDir)
@@ -420,8 +420,8 @@ func TestUninstallHooks(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	output, err := runCLI(t, "hooks", "uninstall", "claude-code")
 	if err != nil {
@@ -481,8 +481,8 @@ func TestInstallHooksEmbedProvPath(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	_, err := runCLI(t, "install-hooks", "claude-code")
 	if err != nil {
