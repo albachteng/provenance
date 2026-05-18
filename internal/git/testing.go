@@ -8,7 +8,7 @@ import (
 
 // InitRepo initializes a new git repository
 func InitRepo(repoPath string) error {
-	cmd := exec.Command("git", "init")
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = repoPath
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git init failed: %w: %s", err, output)
