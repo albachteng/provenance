@@ -329,6 +329,102 @@ Now that v2 core is complete, potential future improvements:
 
 ---
 
+## Git Edge Cases Planning (Future Work)
+
+**Status**: Planning phase - identifying scenarios where commit window assumptions break
+
+### Identified Edge Cases
+
+The current v2 architecture assumes a clean 1:1 relationship between commit windows and prompts based on timestamp ranges. However, several git operations can break this assumption:
+
+#### 1. Cherry-Picking Commits
+**Scenario**: User creates prompts on `feature/auth`, commits, then cherry-picks those commits to `main`
+- **Problem**: Cherry-picked commits have new commit SHAs but same author timestamps
+- **Impact**: `prov blame <cherry-picked-sha>` may show wrong prompts (from different branch/time)
+- **Questions**:
+  - Should prompts follow the original commit or the cherry-pick?
+  - How to detect cherry-picks vs regular commits?
+  - Should we track commit genealogy (original-sha → cherry-picked-sha)?
+
+#### 2. Interactive Rebase / Squashing
+**Scenario**: User creates 5 prompts across 5 commits, then squashes them into 1 commit
+- **Problem**: Single commit window now contains prompts from multiple original time windows
+- **Impact**: All prompts appear in final squashed commit, losing granularity
+- **Questions**:
+  - Is this acceptable? (All prompts did contribute to final state)
+  - Should we track pre-rebase commit SHAs?
+  - How to handle `reword` operations that change commit messages?
+
+#### 3. Rebase (Non-Interactive)
+**Scenario**: User rebases feature branch onto updated main
+- **Problem**: Commit SHAs change, commit timestamps may shift
+- **Impact**: Commit window queries use new timestamps, may exclude prompts from original work
+- **Questions**:
+  - Should `branch_at_capture` be sufficient to track pre-rebase work?
+  - Do we need to track "commit intent" vs "commit SHA"?
+  - How to handle conflicts resolved during rebase?
+
+#### 4. Merge Commits (Complex)
+**Scenario**: User merges `feature/auth` into `main`, git creates merge commit
+- **Problem**: Merge commit has two parents, unclear which commit window to use
+- **Impact**: `prov blame <merge-sha>` shows empty results (no prompts in merge commit's narrow window)
+- **Questions**:
+  - Should merge commits show prompts from both parents?
+  - Should merge commits show only conflict resolution prompts?
+  - How far back should we look in parent history?
+
+#### 5. Amend Commits
+**Scenario**: User commits code, realizes mistake, uses `git commit --amend`
+- **Problem**: New commit SHA, old prompts now point to non-existent commit
+- **Impact**: Original prompts may be "orphaned" from commit history
+- **Questions**:
+  - Should amends update `branch_at_capture` for related prompts?
+  - How to detect amends vs regular commits?
+  - Is timestamp-based window sufficient here?
+
+#### 6. Stash and Apply
+**Scenario**: User creates prompts, stashes changes, switches branches, applies stash
+- **Problem**: Prompts captured on branch A, committed on branch B
+- **Impact**: `branch_at_capture` shows branch A, but commit is on branch B
+- **Questions**:
+  - Is `pre_branch_switch` flag sufficient for this case?
+  - Should we track stash operations?
+  - How to handle stash conflicts?
+
+### Proposed Investigation Approach
+
+**Phase 1: Data Collection**
+1. Add debug logging for complex git operations (cherry-pick, rebase, merge)
+2. Collect real-world examples from development
+3. Identify which edge cases actually occur in practice
+
+**Phase 2: Design Solutions**
+Based on actual usage patterns:
+- Determine if timestamp-based windows + `branch_at_capture` is sufficient
+- Evaluate need for commit genealogy tracking (original-sha → new-sha mappings)
+- Consider adding `git_operation` field to prompts (cherry-pick, rebase, merge, etc.)
+- Design query strategies for multi-parent commits
+
+**Phase 3: Implementation**
+- Extend schema if needed (e.g., `commit_lineage` table)
+- Update blame queries to handle special cases
+- Add tests for each edge case
+- Document expected behavior
+
+### Current Workarounds
+
+Until edge cases are fully addressed, users can:
+- Use `prov tag` commands (Feature 6) to manually override incorrect correlations
+- Query by branch instead of commit: `prov branch show <branch-name>`
+- Export data and analyze externally for complex git histories
+
+### Related Work
+- Feature 6 (Manual Tagging) provides escape hatch for broken correlations
+- Branch query commands (Feature 1) provide alternative query path
+- Tool invocations table already tracks detailed context per prompt
+
+---
+
 ## Phase 0: Foundation (Weeks 1-2)
 
 **Goal**: Core storage engine and CLI scaffold
