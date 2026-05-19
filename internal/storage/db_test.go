@@ -87,7 +87,6 @@ func TestPromptEventSchema(t *testing.T) {
 	expectedColumns := map[string]bool{
 		"id":                true,
 		"timestamp":         true,
-		"session_id":        true, // Nullable, legacy from v1
 		"agent":             true,
 		"model_version":     true,
 		"prompt_text":       true,

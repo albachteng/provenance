@@ -211,7 +211,7 @@ func listEvents(limit int) error {
 	// TODO: implement proper querying (by session, agent, user, project, etc)
 	// For now, get events from all sessions
 	rows, err := db.Query(`
-		SELECT id, timestamp, session_id, agent, prompt_text, author
+		SELECT id, timestamp, agent, prompt_text, author
 		FROM prompt_events
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -226,10 +226,10 @@ func listEvents(limit int) error {
 
 	count := 0
 	for rows.Next() {
-		var id, sessionID, agent, promptText, author string
+		var id, agent, promptText, author string
 		var timestamp int64
 
-		if err := rows.Scan(&id, &timestamp, &sessionID, &agent, &promptText, &author); err != nil {
+		if err := rows.Scan(&id, &timestamp, &agent, &promptText, &author); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -276,7 +276,6 @@ func showEvent(eventID string) error {
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Printf("ID:           %s\n", event.ID)
 	fmt.Printf("Timestamp:    %s\n", event.Timestamp.Format(time.RFC3339))
-	fmt.Printf("Session ID:   %s\n", event.SessionID)
 	fmt.Printf("Agent:        %s\n", event.Agent)
 	fmt.Printf("Model:        %s\n", event.ModelVersion)
 	fmt.Printf("Author:       %s\n", event.Author)
@@ -318,7 +317,7 @@ func searchEvents(query string) error {
 	defer db.Close() //nolint:errcheck
 
 	rows, err := db.Query(`
-		SELECT id, timestamp, session_id, agent, prompt_text
+		SELECT id, timestamp, agent, prompt_text
 		FROM prompt_events
 		WHERE prompt_text LIKE ? OR response_text LIKE ?
 		ORDER BY timestamp DESC
@@ -335,10 +334,10 @@ func searchEvents(query string) error {
 
 	count := 0
 	for rows.Next() {
-		var id, sessionID, agent, promptText string
+		var id, agent, promptText string
 		var timestamp int64
 
-		if err := rows.Scan(&id, &timestamp, &sessionID, &agent, &promptText); err != nil {
+		if err := rows.Scan(&id, &timestamp, &agent, &promptText); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -488,7 +487,6 @@ func sendEventToDaemon(agent, promptText string) {
 	event := storage.PromptEvent{
 		ID:              generateEventID(),
 		Timestamp:       time.Now(),
-		SessionID:       "", // V2: nullable, not used
 		Agent:           agent,
 		PromptText:      promptText,
 		RepoPath:        repoPath,
@@ -692,7 +690,6 @@ func captureHook() error {
 	event := storage.PromptEvent{
 		ID:              generateEventID(),
 		Timestamp:       time.Now(),
-		SessionID:       "", // V2: nullable, not used
 		Agent:           "claude-code",
 		PromptText:      promptText,
 		RepoPath:        cwd,
@@ -784,7 +781,6 @@ func uninstallHooks(agent string) error {
 		"claude-prompt.py",
 		"claude-tool-pre.py",
 		"claude-tool-post.py",
-		"claude-session.py",
 	}
 
 	for _, script := range scripts {
@@ -1008,6 +1004,7 @@ func cmdExport() {
 	fmt.Fprintln(os.Stderr, "  prov export --branch <name> --format json")
 	os.Exit(1)
 }
+
 // cmdBlame shows which AI prompts led to changes in a commit or file
 func cmdBlame() {
 	if len(os.Args) < 3 {

@@ -121,9 +121,9 @@ func TestCLIList(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	// V2: sessions removed, sessionID can be empty
-	createTestEvent(t, db, "event-1", "", "First test prompt")
-	createTestEvent(t, db, "event-2", "", "Second test prompt")
+	// V2: sessions removed
+	createTestEvent(t, db, "event-1", "First test prompt")
+	createTestEvent(t, db, "event-2", "Second test prompt")
 
 	output, err := runCLI(t, "list")
 	if err != nil {
@@ -148,9 +148,9 @@ func TestCLIListLimit(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	// V2: sessions removed, sessionID can be empty
+	// V2: sessions removed
 	for i := 0; i < 10; i++ {
-		createTestEvent(t, db, fmt.Sprintf("event-%d", i), "", fmt.Sprintf("Prompt %d", i))
+		createTestEvent(t, db, fmt.Sprintf("event-%d", i), fmt.Sprintf("Prompt %d", i))
 	}
 
 	output, err := runCLI(t, "list", "--limit", "3")
@@ -180,8 +180,7 @@ func TestCLIShow(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	// V2: sessions removed, sessionID can be empty
-	createTestEvent(t, db, "show-event-1", "", "Show this prompt")
+	createTestEvent(t, db, "show-event-1", "Show this prompt")
 
 	output, err := runCLI(t, "show", "show-event-1")
 	if err != nil {
@@ -218,10 +217,10 @@ func TestCLISearch(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	// V2: sessions removed, sessionID can be empty
-	createTestEvent(t, db, "search-1", "", "Implement authentication feature")
-	createTestEvent(t, db, "search-2", "", "Fix bug in database layer")
-	createTestEvent(t, db, "search-3", "", "Add authentication tests")
+	// V2: sessions removed
+	createTestEvent(t, db, "search-1", "Implement authentication feature")
+	createTestEvent(t, db, "search-2", "Fix bug in database layer")
+	createTestEvent(t, db, "search-3", "Add authentication tests")
 
 	output, err := runCLI(t, "search", "authentication")
 	if err != nil {
@@ -273,13 +272,12 @@ func setupTestDB(t *testing.T, tmpDir string) *sql.DB {
 
 // V2 NOTE: createTestSession removed - sessions no longer exist in v2
 
-func createTestEvent(t *testing.T, db *sql.DB, eventID, sessionID, promptText string) {
+func createTestEvent(t *testing.T, db *sql.DB, eventID, promptText string) {
 	t.Helper()
 
 	event := &storage.PromptEvent{
 		ID:         eventID,
 		Timestamp:  time.Now(),
-		SessionID:  sessionID,
 		Agent:      "test-cli",
 		PromptText: promptText,
 		RepoPath:   "/home/user/test",

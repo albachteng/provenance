@@ -21,7 +21,7 @@ func TestInstallHooksClaudeCode(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	_ = os.Setenv("HOME", tmpDir)                        //nolint:errcheck
 	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	output, err := runCLI(t, "install-hooks", "claude-code")
@@ -121,7 +121,7 @@ func TestInstallHooksExistingSettings(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	_ = os.Setenv("HOME", tmpDir)                        //nolint:errcheck
 	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	output, err := runCLI(t, "install-hooks", "claude-code")
@@ -180,7 +180,6 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 
 	hookInput := map[string]interface{}{
 		"hook_event_name": "UserPromptSubmit",
-		"session_id":      "ses-test-123",
 		"prompt":          "Implement authentication for the API",
 		"cwd":             "/home/user/project",
 		"permission_mode": "auto",
@@ -202,7 +201,7 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 	})
 
 	rows, err := db.Query(`
-		SELECT agent, prompt_text, session_id, ide
+		SELECT agent, prompt_text, ide
 		FROM prompt_events
 		ORDER BY timestamp DESC
 		LIMIT 1
@@ -216,8 +215,8 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 		t.Fatal("Expected event in database")
 	}
 
-	var agent, promptText, sessionID, ide string
-	if err := rows.Scan(&agent, &promptText, &sessionID, &ide); err != nil {
+	var agent, promptText, ide string
+	if err := rows.Scan(&agent, &promptText, &ide); err != nil {
 		t.Fatalf("Failed to scan event: %v", err)
 	}
 
@@ -227,11 +226,6 @@ func TestCaptureHookUserPrompt(t *testing.T) {
 
 	if !strings.Contains(promptText, "Implement authentication") {
 		t.Errorf("Expected prompt text, got: %s", promptText)
-	}
-
-	// V2: session_id not used (v2 uses commit windows instead)
-	if sessionID != "" {
-		t.Logf("Note: session_id is '%s' but v2 doesn't use sessions", sessionID)
 	}
 
 	if ide != "claude-code" {
@@ -262,7 +256,6 @@ func TestCaptureHookToolUse(t *testing.T) {
 
 	preToolInput := map[string]interface{}{
 		"hook_event_name": "PreToolUse",
-		"session_id":      "ses-test-456",
 		"tool_name":       "Edit",
 		"tool_use_id":     "tool-123",
 		"tool_input": map[string]interface{}{
@@ -289,7 +282,6 @@ func TestCaptureHookToolUse(t *testing.T) {
 
 	postToolInput := map[string]interface{}{
 		"hook_event_name": "PostToolUse",
-		"session_id":      "ses-test-456",
 		"tool_name":       "Edit",
 		"tool_use_id":     "tool-123",
 		"tool_input": map[string]interface{}{
@@ -383,7 +375,6 @@ func TestUninstallHooks(t *testing.T) {
 		"claude-prompt.py",
 		"claude-tool-pre.py",
 		"claude-tool-post.py",
-		"claude-session.py",
 	}
 
 	for _, script := range hookScripts {
@@ -420,7 +411,7 @@ func TestUninstallHooks(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	_ = os.Setenv("HOME", tmpDir)                        //nolint:errcheck
 	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	output, err := runCLI(t, "hooks", "uninstall", "claude-code")
@@ -481,7 +472,7 @@ func TestInstallHooksEmbedProvPath(t *testing.T) {
 	}
 
 	oldHome := os.Getenv("HOME")
-	_ = os.Setenv("HOME", tmpDir) //nolint:errcheck
+	_ = os.Setenv("HOME", tmpDir)                        //nolint:errcheck
 	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) }) //nolint:errcheck
 
 	_, err := runCLI(t, "install-hooks", "claude-code")

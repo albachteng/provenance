@@ -15,7 +15,6 @@ func TestStorePromptEvent(t *testing.T) {
 	event := &PromptEvent{
 		ID:           "test-event-1",
 		Timestamp:    time.Now(),
-		SessionID:    "", // V2: nullable, no FK constraint
 		Agent:        "claude-code",
 		ModelVersion: "sonnet-4.5",
 		PromptText:   "Implement user authentication",
@@ -65,7 +64,6 @@ func TestGetPromptEvent(t *testing.T) {
 	originalEvent := &PromptEvent{
 		ID:              "test-event-2",
 		Timestamp:       time.Now().Truncate(time.Second),
-		SessionID:       "",
 		Agent:           "cursor",
 		ModelVersion:    "gpt-4",
 		PromptText:      "Fix the bug in login",
@@ -157,7 +155,6 @@ func TestStorePromptEventWithJSONFields(t *testing.T) {
 	event := &PromptEvent{
 		ID:         "test-event-json",
 		Timestamp:  time.Now(),
-		SessionID:  "",
 		Agent:      "aider",
 		PromptText: "Complex refactoring",
 		RepoPath:   "/home/user/complex-project",
