@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -16,10 +15,9 @@ import (
 	"time"
 
 	"github.com/albachteng/provenance/internal/config"
-	"github.com/albachteng/provenance/internal/correlation"
 	"github.com/albachteng/provenance/internal/daemon"
 	"github.com/albachteng/provenance/internal/git"
-	"github.com/albachteng/provenance/internal/session"
+	"github.com/albachteng/provenance/internal/queries"
 	"github.com/albachteng/provenance/internal/storage"
 	"gopkg.in/yaml.v3"
 )
@@ -34,9 +32,6 @@ var claudeToolPreTemplate string
 
 //go:embed hooks/claude-tool-post.py
 var claudeToolPostTemplate string
-
-//go:embed hooks/claude-session.py
-var claudeSessionScript string
 
 //go:embed hooks/post-commit.sh
 var postCommitHookTemplate string
@@ -193,15 +188,7 @@ func daemonRun() {
 	}
 	defer os.Remove(cfg.Daemon.PIDFile) //nolint:errcheck
 
-	strategy, err := cfg.CreateSessionStrategy()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
-		os.Exit(1)
-	}
-
-	sessionMgr := session.NewManager(db, strategy)
-
-	daemon, err := daemon.NewDaemon(db, cfg.Daemon.SocketPath, sessionMgr, cfg)
+	daemon, err := daemon.NewDaemon(db, cfg.Daemon.SocketPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create daemon: %v\n", err)
 		os.Exit(1)
@@ -224,7 +211,7 @@ func listEvents(limit int) error {
 	// TODO: implement proper querying (by session, agent, user, project, etc)
 	// For now, get events from all sessions
 	rows, err := db.Query(`
-		SELECT id, timestamp, session_id, agent, prompt_text, author
+		SELECT id, timestamp, agent, prompt_text, author
 		FROM prompt_events
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -239,10 +226,10 @@ func listEvents(limit int) error {
 
 	count := 0
 	for rows.Next() {
-		var id, sessionID, agent, promptText, author string
+		var id, agent, promptText, author string
 		var timestamp int64
 
-		if err := rows.Scan(&id, &timestamp, &sessionID, &agent, &promptText, &author); err != nil {
+		if err := rows.Scan(&id, &timestamp, &agent, &promptText, &author); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -289,7 +276,6 @@ func showEvent(eventID string) error {
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Printf("ID:           %s\n", event.ID)
 	fmt.Printf("Timestamp:    %s\n", event.Timestamp.Format(time.RFC3339))
-	fmt.Printf("Session ID:   %s\n", event.SessionID)
 	fmt.Printf("Agent:        %s\n", event.Agent)
 	fmt.Printf("Model:        %s\n", event.ModelVersion)
 	fmt.Printf("Author:       %s\n", event.Author)
@@ -331,7 +317,7 @@ func searchEvents(query string) error {
 	defer db.Close() //nolint:errcheck
 
 	rows, err := db.Query(`
-		SELECT id, timestamp, session_id, agent, prompt_text
+		SELECT id, timestamp, agent, prompt_text
 		FROM prompt_events
 		WHERE prompt_text LIKE ? OR response_text LIKE ?
 		ORDER BY timestamp DESC
@@ -348,10 +334,10 @@ func searchEvents(query string) error {
 
 	count := 0
 	for rows.Next() {
-		var id, sessionID, agent, promptText string
+		var id, agent, promptText string
 		var timestamp int64
 
-		if err := rows.Scan(&id, &timestamp, &sessionID, &agent, &promptText); err != nil {
+		if err := rows.Scan(&id, &timestamp, &agent, &promptText); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -498,39 +484,21 @@ func sendEventToDaemon(agent, promptText string) {
 		author = "unknown"
 	}
 
-	// Get or create a session for this repo
-	sessionID := fmt.Sprintf("session-%s", filepath.Base(repoPath))
-
-	// Send session start event first (on separate connection - daemon reads one message per connection)
-	sessionEvent := struct {
-		Type    string          `json:"type"`
-		Session storage.Session `json:"session"`
-	}{
-		Type: "session_start",
-		Session: storage.Session{
-			ID:        sessionID,
-			StartTime: time.Now(),
-			RepoPath:  repoPath,
-		},
-	}
-	sendMessageToDaemon(socketPath, sessionEvent)
-
-	// Note: No "type" field - daemon routes based on absence of "type"
 	event := storage.PromptEvent{
-		ID:         generateEventID(),
-		Timestamp:  time.Now(),
-		SessionID:  sessionID,
-		Agent:      agent,
-		PromptText: promptText,
-		RepoPath:   repoPath,
-		GitCommit:  gitCommit,
-		GitBranch:  gitBranch,
-		GitDirty:   gitDirty,
-		Author:     author,
-		IDE:        "cli",
+		ID:              generateEventID(),
+		Timestamp:       time.Now(),
+		Agent:           agent,
+		PromptText:      promptText,
+		RepoPath:        repoPath,
+		GitCommit:       gitCommit,
+		GitBranch:       gitBranch,
+		GitDirty:        gitDirty,
+		Author:          author,
+		IDE:             "cli",
+		BranchAtCapture: gitBranch,
+		PreBranchSwitch: false,
 	}
 
-	// Send the prompt event (on separate connection)
 	sendMessageToDaemon(socketPath, event)
 }
 
@@ -577,7 +545,6 @@ func installHooks(agent string) error {
 		"claude-prompt.py":    strings.ReplaceAll(claudePromptTemplate, "{{PROV_PATH}}", provPath),
 		"claude-tool-pre.py":  strings.ReplaceAll(claudeToolPreTemplate, "{{PROV_PATH}}", provPath),
 		"claude-tool-post.py": strings.ReplaceAll(claudeToolPostTemplate, "{{PROV_PATH}}", provPath),
-		"claude-session.py":   claudeSessionScript,
 	}
 
 	for name, content := range scripts {
@@ -676,7 +643,6 @@ func captureHook() error {
 	}
 
 	eventName, _ := hookInput["hook_event_name"].(string)
-	sessionID, _ := hookInput["session_id"].(string)
 	cwd, _ := hookInput["cwd"].(string)
 
 	if cwd == "" {
@@ -719,37 +685,21 @@ func captureHook() error {
 		author = "unknown"
 	}
 
-	if sessionID == "" {
-		sessionID = fmt.Sprintf("session-%s", filepath.Base(cwd))
-	}
-
 	socketPath := getSocketPath()
 
-	sessionEvent := struct {
-		Type    string          `json:"type"`
-		Session storage.Session `json:"session"`
-	}{
-		Type: "session_start",
-		Session: storage.Session{
-			ID:        sessionID,
-			StartTime: time.Now(),
-			RepoPath:  cwd,
-		},
-	}
-	sendMessageToDaemon(socketPath, sessionEvent)
-
 	event := storage.PromptEvent{
-		ID:         generateEventID(),
-		Timestamp:  time.Now(),
-		SessionID:  sessionID,
-		Agent:      "claude-code",
-		PromptText: promptText,
-		RepoPath:   cwd,
-		GitCommit:  gitCommit,
-		GitBranch:  gitBranch,
-		GitDirty:   gitDirty,
-		Author:     author,
-		IDE:        "claude-code",
+		ID:              generateEventID(),
+		Timestamp:       time.Now(),
+		Agent:           "claude-code",
+		PromptText:      promptText,
+		RepoPath:        cwd,
+		GitCommit:       gitCommit,
+		GitBranch:       gitBranch,
+		GitDirty:        gitDirty,
+		Author:          author,
+		IDE:             "claude-code",
+		BranchAtCapture: gitBranch,
+		PreBranchSwitch: false,
 	}
 
 	sendMessageToDaemon(socketPath, event)
@@ -831,7 +781,6 @@ func uninstallHooks(agent string) error {
 		"claude-prompt.py",
 		"claude-tool-pre.py",
 		"claude-tool-post.py",
-		"claude-session.py",
 	}
 
 	for _, script := range scripts {
@@ -941,80 +890,12 @@ func uninstallGitHook(hookType string) error {
 	return nil
 }
 
-// correlateCommit correlates a commit with recent prompts
+// correlateCommit is a stub for v2 architecture
+// V2 uses commit windows instead of pre-computed correlations
+// Correlation is now done on-demand via blame commands
 func correlateCommit(commitSHA, repoPath string) error {
-	// Get database
-	db, err := openDB()
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close() //nolint:errcheck
-
-	// Get commit information
-	cmd := exec.Command("git", "show", "--format=%ct", "--name-only", "--no-patch", commitSHA)
-	cmd.Dir = repoPath
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get commit info: %w", err)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) < 1 {
-		return fmt.Errorf("invalid git show output")
-	}
-
-	// Parse timestamp
-	timestampStr := lines[0]
-	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
-	if err != nil {
-		return fmt.Errorf("failed to parse commit timestamp: %w", err)
-	}
-
-	// Get files changed
-	cmd = exec.Command("git", "show", "--format=", "--name-only", commitSHA)
-	cmd.Dir = repoPath
-	output, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get changed files: %w", err)
-	}
-
-	filesChanged := []string{}
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			filesChanged = append(filesChanged, line)
-		}
-	}
-
-	// Get diff stats
-	cmd = exec.Command("git", "show", "--format=", "--shortstat", commitSHA)
-	cmd.Dir = repoPath
-	output, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get diff stats: %w", err)
-	}
-	diffSummary := strings.TrimSpace(string(output))
-
-	// Create commit info
-	commitInfo := &correlation.CommitInfo{
-		SHA:          commitSHA,
-		Timestamp:    time.Unix(timestamp, 0),
-		RepoPath:     repoPath,
-		FilesChanged: filesChanged,
-		DiffSummary:  diffSummary,
-	}
-
-	// Correlate with prompts (use 15 minute window by default)
-	timeWindow := 15 * time.Minute
-	changeSets, err := correlation.CorrelateCommitToPrompts(db, commitInfo, timeWindow)
-	if err != nil {
-		return fmt.Errorf("failed to correlate commit: %w", err)
-	}
-
-	if len(changeSets) > 0 {
-		fmt.Printf("Correlated commit %s with %d prompt(s)\n", commitSHA[:8], len(changeSets))
-	}
-
+	// V2: Commit window caching will be implemented later
+	// For now, this is a no-op - blame queries compute associations on-demand
 	return nil
 }
 
@@ -1086,689 +967,52 @@ func configValidate() {
 	}
 
 	fmt.Println("Configuration is valid")
-	fmt.Printf("Active strategy: %s\n", cfg.Session.Strategy)
 	fmt.Printf("Database path: %s\n", cfg.Storage.DBPath)
 	fmt.Printf("Socket path: %s\n", cfg.Daemon.SocketPath)
-
-	strategy, err := cfg.CreateSessionStrategy()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create session strategy: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Session strategy: %s\n", strategy.Name())
 }
 
-// Session command implementations
+// Session command implementations (V2: DEPRECATED - sessions removed)
 
 func cmdSession() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: prov session <list|show|end>")
-		os.Exit(1)
-	}
-
-	subcommand := os.Args[2]
-
-	switch subcommand {
-	case "list":
-		sessionList()
-	case "show":
-		if len(os.Args) < 4 {
-			fmt.Fprintln(os.Stderr, "Usage: prov session show <id>")
-			os.Exit(1)
-		}
-		sessionShow(os.Args[3])
-	case "end":
-		if len(os.Args) < 4 {
-			fmt.Fprintln(os.Stderr, "Usage: prov session end <id>")
-			os.Exit(1)
-		}
-		sessionEnd(os.Args[3])
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown session command: %s\n", subcommand)
-		fmt.Fprintln(os.Stderr, "Usage: prov session <list|show|end>")
-		os.Exit(1)
-	}
+	fmt.Fprintln(os.Stderr, "Session commands have been removed in v2 architecture")
+	fmt.Fprintln(os.Stderr, "V2 uses commit windows instead of sessions")
+	fmt.Fprintln(os.Stderr, "Use 'prov blame <commit>' to see prompts for a commit")
+	os.Exit(1)
 }
 
-func sessionList() {
-	activeOnly := false
-	for _, arg := range os.Args[3:] {
-		if arg == "--active" {
-			activeOnly = true
-			break
-		}
-	}
-
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	sessions, err := storage.ListSessions(db, activeOnly)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to list sessions: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(sessions) == 0 {
-		if activeOnly {
-			fmt.Println("No active sessions")
-		} else {
-			fmt.Println("No sessions found")
-		}
-		return
-	}
-
-	fmt.Printf("%-12s %-20s %-10s %-8s %-20s %s\n", "ID", "Start Time", "Duration", "Prompts", "Repo", "Status")
-	fmt.Println(strings.Repeat("-", 100))
-
-	for _, s := range sessions {
-		startTime := s.StartTime.Format("2006-01-02 15:04:05")
-
-		var duration string
-		var status string
-		if s.EndTime == nil {
-			duration = formatDuration(time.Since(s.StartTime))
-			status = "Active"
-		} else {
-			duration = formatDuration(s.EndTime.Sub(s.StartTime))
-			if s.EndedBy != "" {
-				status = fmt.Sprintf("Ended (%s)", s.EndedBy)
-			} else {
-				status = "Ended"
-			}
-		}
-
-		repoName := filepath.Base(s.RepoPath)
-		if repoName == "." || repoName == "/" {
-			repoName = s.RepoPath
-		}
-
-		displayID := s.ID
-		if len(displayID) > 12 {
-			displayID = displayID[:12]
-		}
-
-		fmt.Printf("%-12s %-20s %-10s %-8d %-20s %s\n",
-			displayID, startTime, duration, s.TotalPrompts, repoName, status)
-	}
-
-	fmt.Printf("\nShowing %d session(s)\n", len(sessions))
-}
-
-func sessionShow(sessionID string) {
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	session, err := storage.GetSession(db, sessionID)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			fmt.Fprintf(os.Stderr, "Session not found: %s\n", sessionID)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "Failed to get session: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Session ID: %s\n", session.ID)
-	fmt.Printf("Repository: %s\n", session.RepoPath)
-	fmt.Printf("Start Time: %s\n", session.StartTime.Format("2006-01-02 15:04:05"))
-
-	if session.EndTime == nil {
-		fmt.Printf("Status: Active (duration: %s)\n", formatDuration(time.Since(session.StartTime)))
-	} else {
-		fmt.Printf("End Time: %s\n", session.EndTime.Format("2006-01-02 15:04:05"))
-		fmt.Printf("Duration: %s\n", formatDuration(session.EndTime.Sub(session.StartTime)))
-		if session.EndedBy != "" {
-			fmt.Printf("Ended By: %s\n", session.EndedBy)
-		}
-	}
-
-	fmt.Printf("Total Prompts: %d\n", session.TotalPrompts)
-	fmt.Printf("Total Tokens: %d\n", session.TotalTokens)
-	fmt.Println()
-
-	events, err := storage.ListPromptEvents(db, sessionID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to list prompts: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(events) == 0 {
-		fmt.Println("No prompts in this session")
-		return
-	}
-
-	fmt.Printf("Prompts (%d):\n", len(events))
-	fmt.Printf("%-25s %-20s %-15s %s\n", "ID", "Timestamp", "Agent", "Prompt")
-	fmt.Println(strings.Repeat("-", 120))
-
-	for _, event := range events {
-		timestamp := event.Timestamp.Format("2006-01-02 15:04:05")
-		promptPreview := event.PromptText
-		if len(promptPreview) > 60 {
-			promptPreview = promptPreview[:57] + "..."
-		}
-
-		fmt.Printf("%-25s %-20s %-15s %s\n", event.ID, timestamp, event.Agent, promptPreview)
-	}
-}
-
-func sessionEnd(sessionID string) {
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	session, err := storage.GetSession(db, sessionID)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			fmt.Fprintf(os.Stderr, "Session not found: %s\n", sessionID)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "Failed to get session: %v\n", err)
-		os.Exit(1)
-	}
-
-	if session.EndTime != nil {
-		fmt.Fprintf(os.Stderr, "Session is already ended\n")
-		os.Exit(1)
-	}
-
-	if err := storage.EndSession(db, sessionID, time.Now(), "manual"); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to end session: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Session %s ended successfully\n", sessionID)
-}
-
-// formatDuration formats a duration in a human-readable way
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		hours := int(d.Hours())
-		minutes := int(d.Minutes()) % 60
-		return fmt.Sprintf("%dh%dm", hours, minutes)
-	}
-	days := int(d.Hours()) / 24
-	hours := int(d.Hours()) % 24
-	return fmt.Sprintf("%dd%dh", days, hours)
-}
+// sessionList is deprecated in v2
+// V2 NOTE: Session commands removed - v2 uses commit windows instead of sessions
+// Removed functions: sessionList(), sessionShow(), sessionEnd(), formatDuration()
 
 func cmdStats() {
-	var sessionID string
-	var sinceStr string
-
-	for i := 2; i < len(os.Args); i++ {
-		if os.Args[i] == "--session" && i+1 < len(os.Args) {
-			sessionID = os.Args[i+1]
-			i++
-		} else if os.Args[i] == "--since" && i+1 < len(os.Args) {
-			sinceStr = os.Args[i+1]
-			i++
-		}
-	}
-
-	if sessionID != "" {
-		statsSession(sessionID)
-		return
-	}
-
-	if sinceStr != "" {
-		statsSince(sinceStr)
-		return
-	}
-
-	statsRepo()
+	fmt.Fprintln(os.Stderr, "Stats commands not yet implemented in v2 architecture")
+	fmt.Fprintln(os.Stderr, "Planned features:")
+	fmt.Fprintln(os.Stderr, "  - prov stats --branch <name>  # Per-branch aggregation")
+	fmt.Fprintln(os.Stderr, "  - prov stats --since <date>   # Timeframe statistics")
+	fmt.Fprintln(os.Stderr, "  - prov stats                  # Repository-wide stats")
+	os.Exit(1)
 }
 
-func statsRepo() {
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	repoPath, err := findGitRoot()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to find git repository: %v\n", err)
-		os.Exit(1)
-	}
-
-	stats, err := storage.GetRepoStats(db, repoPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to get repository statistics: %v\n", err)
-		os.Exit(1)
-	}
-
-	displayStats("Repository", stats.TotalPrompts, stats.TotalTokensIn, stats.TotalTokensOut,
-		stats.SessionCount, stats.FilesMentioned, stats.ToolsInvoked)
-}
-
-func statsSession(sessionID string) {
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	stats, err := storage.GetSessionStats(db, sessionID)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			fmt.Fprintf(os.Stderr, "Session not found: %s\n", sessionID)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "Failed to get session statistics: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Session: %s\n\n", stats.SessionID)
-	displayStats("Session", stats.TotalPrompts, stats.TotalTokensIn, stats.TotalTokensOut,
-		1, stats.FilesMentioned, stats.ToolsInvoked)
-}
-
-func statsSince(sinceStr string) {
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	repoPath, err := findGitRoot()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to find git repository: %v\n", err)
-		os.Exit(1)
-	}
-
-	since, err := parseTimeString(sinceStr)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse time: %v\n", err)
-		os.Exit(1)
-	}
-
-	stats, err := storage.GetTimeframeStats(db, repoPath, since)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to get statistics: %v\n", err)
-		os.Exit(1)
-	}
-
-	displayStats(fmt.Sprintf("Since %s", sinceStr), stats.TotalPrompts, stats.TotalTokensIn,
-		stats.TotalTokensOut, stats.SessionCount, stats.FilesMentioned, stats.ToolsInvoked)
-}
-
-func displayStats(title string, prompts, tokensIn, tokensOut, sessions int,
-	files map[string]int, tools map[string]int) {
-
-	fmt.Printf("%s Statistics\n", title)
-	fmt.Println(strings.Repeat("=", 50))
-	fmt.Printf("Total Prompts: %d\n", prompts)
-	fmt.Printf("Tokens In: %d\n", tokensIn)
-	fmt.Printf("Tokens Out: %d\n", tokensOut)
-	fmt.Printf("Sessions: %d\n", sessions)
-	fmt.Println()
-
-	if len(files) > 0 {
-		fmt.Println("Top Files Mentioned:")
-		type fileStat struct {
-			path  string
-			count int
-		}
-		var fileStats []fileStat
-		for path, count := range files {
-			fileStats = append(fileStats, fileStat{path, count})
-		}
-		for i := 0; i < len(fileStats); i++ {
-			for j := i + 1; j < len(fileStats); j++ {
-				if fileStats[j].count > fileStats[i].count {
-					fileStats[i], fileStats[j] = fileStats[j], fileStats[i]
-				}
-			}
-		}
-		limit := 10
-		if len(fileStats) < limit {
-			limit = len(fileStats)
-		}
-		for i := 0; i < limit; i++ {
-			fmt.Printf("  %3d  %s\n", fileStats[i].count, fileStats[i].path)
-		}
-		fmt.Println()
-	}
-
-	if len(tools) > 0 {
-		fmt.Println("Top Tools Invoked:")
-		type toolStat struct {
-			name  string
-			count int
-		}
-		var toolStats []toolStat
-		for name, count := range tools {
-			toolStats = append(toolStats, toolStat{name, count})
-		}
-		for i := 0; i < len(toolStats); i++ {
-			for j := i + 1; j < len(toolStats); j++ {
-				if toolStats[j].count > toolStats[i].count {
-					toolStats[i], toolStats[j] = toolStats[j], toolStats[i]
-				}
-			}
-		}
-		limit := 10
-		if len(toolStats) < limit {
-			limit = len(toolStats)
-		}
-		for i := 0; i < limit; i++ {
-			fmt.Printf("  %3d  %s\n", toolStats[i].count, toolStats[i].name)
-		}
-		fmt.Println()
-	}
-}
-
-func parseTimeString(timeStr string) (time.Time, error) {
-	timeStr = strings.TrimSpace(timeStr)
-
-	// Parse relative time like "7 days ago", "2 hours ago", "30 minutes ago"
-	parts := strings.Fields(timeStr)
-	if len(parts) == 3 && parts[2] == "ago" {
-		amount, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return time.Time{}, fmt.Errorf("invalid time amount: %s", parts[0])
-		}
-
-		unit := parts[1]
-		now := time.Now()
-
-		switch {
-		case strings.HasPrefix(unit, "second"):
-			return now.Add(-time.Duration(amount) * time.Second), nil
-		case strings.HasPrefix(unit, "minute"):
-			return now.Add(-time.Duration(amount) * time.Minute), nil
-		case strings.HasPrefix(unit, "hour"):
-			return now.Add(-time.Duration(amount) * time.Hour), nil
-		case strings.HasPrefix(unit, "day"):
-			return now.Add(-time.Duration(amount) * 24 * time.Hour), nil
-		case strings.HasPrefix(unit, "week"):
-			return now.Add(-time.Duration(amount) * 7 * 24 * time.Hour), nil
-		case strings.HasPrefix(unit, "month"):
-			return now.AddDate(0, -amount, 0), nil
-		case strings.HasPrefix(unit, "year"):
-			return now.AddDate(-amount, 0, 0), nil
-		default:
-			return time.Time{}, fmt.Errorf("unknown time unit: %s", unit)
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("invalid time format: %s (expected format like '7 days ago')", timeStr)
-}
+// V2 NOTE: Old stats and export functions removed - will be reimplemented with commit window queries
+// Removed: statsRepo(), statsSession(), statsSince(), displayStats(), parseTimeString()
+// Removed: exportAllEvents(), exportEventsSince(), scanPromptEvents(), exportJSON(), exportCSV(), escapeCSV()
 
 func cmdExport() {
-	var format string
-	var sessionID string
-	var sinceStr string
-	var outputPath string
-
-	for i := 2; i < len(os.Args); i++ {
-		if os.Args[i] == "--format" && i+1 < len(os.Args) {
-			format = os.Args[i+1]
-			i++
-		} else if os.Args[i] == "--session" && i+1 < len(os.Args) {
-			sessionID = os.Args[i+1]
-			i++
-		} else if os.Args[i] == "--since" && i+1 < len(os.Args) {
-			sinceStr = os.Args[i+1]
-			i++
-		} else if os.Args[i] == "--output" && i+1 < len(os.Args) {
-			outputPath = os.Args[i+1]
-			i++
-		}
-	}
-
-	if format == "" {
-		format = "json"
-	}
-
-	if format != "json" && format != "csv" {
-		fmt.Fprintf(os.Stderr, "Invalid format: %s (must be 'json' or 'csv')\n", format)
-		os.Exit(1)
-	}
-
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	var events []*storage.PromptEvent
-
-	if sessionID != "" {
-		events, err = storage.ListPromptEvents(db, sessionID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to list events for session: %v\n", err)
-			os.Exit(1)
-		}
-	} else if sinceStr != "" {
-		since, err := parseTimeString(sinceStr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to parse time: %v\n", err)
-			os.Exit(1)
-		}
-		events, err = exportEventsSince(db, since)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to export events: %v\n", err)
-			os.Exit(1)
-		}
-	} else {
-		events, err = exportAllEvents(db)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to export events: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	var output []byte
-	if format == "json" {
-		output, err = exportJSON(events)
-	} else {
-		output, err = exportCSV(events)
-	}
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to export data: %v\n", err)
-		os.Exit(1)
-	}
-
-	if outputPath != "" {
-		if err := os.WriteFile(outputPath, output, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to write output file: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Exported %d events to %s\n", len(events), outputPath)
-	} else {
-		fmt.Print(string(output))
-	}
-}
-
-func exportAllEvents(db *sql.DB) ([]*storage.PromptEvent, error) {
-	query := `
-		SELECT id, timestamp, session_id, agent, model_version, prompt_text, response_text,
-		       tokens_in, tokens_out, latency_ms, repo_path, git_commit, git_branch, git_dirty,
-		       dirty_files, author, ide, active_file, workspace_files, prompt_type,
-		       tools_invoked, files_mentioned
-		FROM prompt_events
-		ORDER BY timestamp DESC
-	`
-
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query events: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	return scanPromptEvents(rows)
-}
-
-func exportEventsSince(db *sql.DB, since time.Time) ([]*storage.PromptEvent, error) {
-	query := `
-		SELECT id, timestamp, session_id, agent, model_version, prompt_text, response_text,
-		       tokens_in, tokens_out, latency_ms, repo_path, git_commit, git_branch, git_dirty,
-		       dirty_files, author, ide, active_file, workspace_files, prompt_type,
-		       tools_invoked, files_mentioned
-		FROM prompt_events
-		WHERE timestamp >= ?
-		ORDER BY timestamp DESC
-	`
-
-	rows, err := db.Query(query, since.Unix())
-	if err != nil {
-		return nil, fmt.Errorf("failed to query events: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	return scanPromptEvents(rows)
-}
-
-func scanPromptEvents(rows *sql.Rows) ([]*storage.PromptEvent, error) {
-	var events []*storage.PromptEvent
-
-	for rows.Next() {
-		var e storage.PromptEvent
-		var timestampUnix int64
-		var modelVersion, responseText, gitCommit, gitBranch, ide, activeFile sql.NullString
-		var latencyMs sql.NullInt64
-		var gitDirty sql.NullBool
-		var dirtyFilesJSON, workspaceFilesJSON, promptType, toolsInvokedJSON, filesMentionedJSON string
-
-		err := rows.Scan(
-			&e.ID, &timestampUnix, &e.SessionID, &e.Agent, &modelVersion,
-			&e.PromptText, &responseText, &e.TokensIn, &e.TokensOut, &latencyMs,
-			&e.RepoPath, &gitCommit, &gitBranch, &gitDirty, &dirtyFilesJSON,
-			&e.Author, &ide, &activeFile, &workspaceFilesJSON, &promptType,
-			&toolsInvokedJSON, &filesMentionedJSON,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan event: %w", err)
-		}
-
-		e.Timestamp = time.Unix(timestampUnix, 0)
-
-		if modelVersion.Valid {
-			e.ModelVersion = modelVersion.String
-		}
-		if responseText.Valid {
-			e.ResponseText = responseText.String
-		}
-		if latencyMs.Valid {
-			e.LatencyMs = int(latencyMs.Int64)
-		}
-		if gitCommit.Valid {
-			e.GitCommit = gitCommit.String
-		}
-		if gitBranch.Valid {
-			e.GitBranch = gitBranch.String
-		}
-		if gitDirty.Valid {
-			e.GitDirty = gitDirty.Bool
-		}
-		if ide.Valid {
-			e.IDE = ide.String
-		}
-		if activeFile.Valid {
-			e.ActiveFile = activeFile.String
-		}
-		if promptType != "" {
-			e.PromptType = promptType
-		}
-
-		json.Unmarshal([]byte(dirtyFilesJSON), &e.DirtyFiles)         //nolint:errcheck
-		json.Unmarshal([]byte(workspaceFilesJSON), &e.WorkspaceFiles) //nolint:errcheck
-		json.Unmarshal([]byte(toolsInvokedJSON), &e.ToolsInvoked)     //nolint:errcheck
-		json.Unmarshal([]byte(filesMentionedJSON), &e.FilesMentioned) //nolint:errcheck
-
-		events = append(events, &e)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating events: %w", err)
-	}
-
-	return events, nil
-}
-
-func exportJSON(events []*storage.PromptEvent) ([]byte, error) {
-	return json.MarshalIndent(events, "", "  ")
-}
-
-func exportCSV(events []*storage.PromptEvent) ([]byte, error) {
-	var buf strings.Builder
-
-	buf.WriteString("id,timestamp,session_id,agent,model_version,prompt_text,response_text,")
-	buf.WriteString("tokens_in,tokens_out,latency_ms,repo_path,git_commit,git_branch,git_dirty,")
-	buf.WriteString("author,ide,active_file,prompt_type,tools_invoked,files_mentioned\n")
-
-	for _, e := range events {
-		fields := []string{
-			e.ID,
-			e.Timestamp.Format(time.RFC3339),
-			e.SessionID,
-			e.Agent,
-			e.ModelVersion,
-			escapeCSV(e.PromptText),
-			escapeCSV(e.ResponseText),
-			fmt.Sprintf("%d", e.TokensIn),
-			fmt.Sprintf("%d", e.TokensOut),
-			fmt.Sprintf("%d", e.LatencyMs),
-			e.RepoPath,
-			e.GitCommit,
-			e.GitBranch,
-			fmt.Sprintf("%t", e.GitDirty),
-			e.Author,
-			e.IDE,
-			e.ActiveFile,
-			e.PromptType,
-			escapeCSV(strings.Join(e.ToolsInvoked, ";")),
-			escapeCSV(strings.Join(e.FilesMentioned, ";")),
-		}
-
-		buf.WriteString(strings.Join(fields, ","))
-		buf.WriteString("\n")
-	}
-
-	return []byte(buf.String()), nil
-}
-
-func escapeCSV(field string) string {
-	if strings.ContainsAny(field, ",\"\n\r") {
-		field = strings.ReplaceAll(field, "\"", "\"\"")
-		return "\"" + field + "\""
-	}
-	return field
+	fmt.Fprintln(os.Stderr, "Export commands not yet fully implemented in v2 architecture")
+	fmt.Fprintln(os.Stderr, "Planned usage:")
+	fmt.Fprintln(os.Stderr, "  prov export --format json|csv [--since <time>] [--output <file>]")
+	fmt.Fprintln(os.Stderr, "  prov export --branch <name> --format json")
+	os.Exit(1)
 }
 
 // cmdBlame shows which AI prompts led to changes in a commit or file
 func cmdBlame() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: prov blame <commit-sha|file-path>")
+		fmt.Fprintln(os.Stderr, "Usage: prov blame <commit-sha>")
 		os.Exit(1)
 	}
 
-	target := os.Args[2]
+	commitSHA := os.Args[2]
 
 	db, err := openDB()
 	if err != nil {
@@ -1777,59 +1021,71 @@ func cmdBlame() {
 	}
 	defer db.Close() //nolint:errcheck
 
-	var changeSets []*storage.ChangeSet
-	changeSets, err = storage.GetChangeSetsForCommitPrefix(db, target)
+	// Get current repo path
+	repoPath, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to query change sets: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to get current directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(changeSets) == 0 {
-		changeSets, err = storage.GetChangeSetsForFile(db, target)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to query change sets: %v\n", err)
-			os.Exit(1)
-		}
+	// Get the branch for this commit
+	branch, err := git.GetBranchForCommit(repoPath, commitSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to determine branch for commit: %v\n", err)
+		os.Exit(1)
 	}
 
-	if len(changeSets) == 0 {
-		fmt.Println("No prompts found for this commit or file")
+	// Query prompts in commit window
+	prompts, err := queries.GetPromptsForCommit(db, repoPath, commitSHA, branch)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to query prompts: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(prompts) == 0 {
+		fmt.Println("No prompts found in commit window")
 		return
 	}
 
-	fmt.Printf("Found %d prompt(s) that led to changes:\n\n", len(changeSets))
+	// Get commit time for display
+	commitTime, err := git.GetCommitTime(repoPath, commitSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get commit time: %v\n", err)
+		os.Exit(1)
+	}
 
-	for i, cs := range changeSets {
-		prompt, err := storage.GetPromptEvent(db, cs.PromptID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to get prompt %s: %v\n", cs.PromptID, err)
-			continue
-		}
+	// Get files changed in commit
+	filesChanged, err := git.GetFilesChanged(repoPath, commitSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to get files changed: %v\n", err)
+		filesChanged = []string{}
+	}
 
-		correlationIndicator := ""
-		if cs.CorrelationMethod == "manual" {
-			correlationIndicator = " [manual]"
-		}
+	fmt.Printf("Commit: %s (%s)\n", commitSHA, commitTime.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Branch: %s\n", branch)
+	fmt.Printf("\nFound %d prompt(s) in commit window:\n\n", len(prompts))
 
-		fmt.Printf("[%d] Commit: %s (Confidence: %.2f / %.0f%%)%s\n", i+1, cs.CommitIntroduced, cs.Confidence, cs.Confidence*100, correlationIndicator)
-		fmt.Printf("    Prompt ID: %s\n", prompt.ID)
+	for i, prompt := range prompts {
+		fmt.Printf("[%d] Prompt ID: %s\n", i+1, prompt.ID)
 		fmt.Printf("    Timestamp: %s\n", prompt.Timestamp.Format("2006-01-02 15:04:05"))
 		fmt.Printf("    Agent: %s\n", prompt.Agent)
-		fmt.Printf("    Author: %s\n", prompt.Author)
+		if prompt.Author != "" {
+			fmt.Printf("    Author: %s\n", prompt.Author)
+		}
 		fmt.Printf("    Prompt: %s\n", truncatePrompt(prompt.PromptText, 200))
 
-		if len(cs.FilesChanged) > 0 {
-			fmt.Printf("    Files Changed:\n")
-			for _, file := range cs.FilesChanged {
-				fmt.Printf("      - %s\n", file)
-			}
-		}
-
-		if cs.DiffSummary != "" {
-			fmt.Printf("    Diff: %s\n", cs.DiffSummary)
+		if len(prompt.ToolsInvoked) > 0 {
+			fmt.Printf("    Tools: %v\n", prompt.ToolsInvoked)
 		}
 
 		fmt.Println()
+	}
+
+	if len(filesChanged) > 0 {
+		fmt.Printf("Files changed in commit:\n")
+		for _, file := range filesChanged {
+			fmt.Printf("  - %s\n", file)
+		}
 	}
 }
 
@@ -1841,116 +1097,17 @@ func truncatePrompt(prompt string, maxLen int) string {
 }
 
 func cmdTag() {
-	// Check minimum args before parsing flags
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha>")
-		fmt.Fprintln(os.Stderr, "   or: prov tag <prompt-id> --file <path>")
-		os.Exit(1)
-	}
-
-	// First arg after "tag" is prompt ID
-	// Check if it's a flag instead of a prompt-id
-	if strings.HasPrefix(os.Args[2], "-") {
-		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha>")
-		fmt.Fprintln(os.Stderr, "   or: prov tag <prompt-id> --file <path>")
-		os.Exit(1)
-	}
-
-	promptID := os.Args[2]
-
-	// Parse flags starting from the third argument
-	fs := flag.NewFlagSet("tag", flag.ExitOnError)
-	commitFlag := fs.String("commit", "", "Commit SHA to tag")
-	fileFlag := fs.String("file", "", "File path to tag")
-	fs.Parse(os.Args[3:]) //nolint:errcheck
-
-	// Validate flags
-	if *commitFlag == "" && *fileFlag == "" {
-		fmt.Fprintln(os.Stderr, "Error: Must specify either --commit or --file")
-		os.Exit(1)
-	}
-
-	if *commitFlag != "" && *fileFlag != "" {
-		fmt.Fprintln(os.Stderr, "Error: Cannot specify both --commit and --file (mutually exclusive)")
-		os.Exit(1)
-	}
-
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	// Verify prompt exists
-	prompt, err := storage.GetPromptEvent(db, promptID)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			fmt.Fprintf(os.Stderr, "Error: Prompt not found: %s\n", promptID)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: Failed to query prompt: %v\n", err)
-		}
-		os.Exit(1)
-	}
-
-	// Create manual change set
-	changeSet := &storage.ChangeSet{
-		ID:                fmt.Sprintf("cs-%d-%s", time.Now().UnixNano(), promptID[:8]),
-		PromptID:          promptID,
-		SessionID:         prompt.SessionID,
-		Timestamp:         time.Now(),
-		CorrelationMethod: "manual",
-		Confidence:        1.0,
-	}
-
-	if *commitFlag != "" {
-		changeSet.CommitIntroduced = *commitFlag
-		changeSet.FilesChanged = []string{} // Empty for commit-only tags
-	} else {
-		changeSet.FilesChanged = []string{*fileFlag}
-		changeSet.CommitIntroduced = "" // Empty for file-only tags
-	}
-
-	if err := storage.CreateChangeSet(db, changeSet); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to create tag: %v\n", err)
-		os.Exit(1)
-	}
-
-	if *commitFlag != "" {
-		fmt.Printf("Tagged prompt %s to commit %s\n", promptID, *commitFlag)
-	} else {
-		fmt.Printf("Tagged prompt %s to file %s\n", promptID, *fileFlag)
-	}
+	fmt.Fprintln(os.Stderr, "Manual tagging not yet implemented in v2 architecture")
+	fmt.Fprintln(os.Stderr, "Planned usage:")
+	fmt.Fprintln(os.Stderr, "  prov tag <commit-sha> <prompt-id>")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "This will override automated commit window detection")
+	os.Exit(1)
 }
 
 func cmdUntag() {
-	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "Usage: prov untag <prompt-id> <commit-sha>")
-		os.Exit(1)
-	}
-
-	promptID := os.Args[2]
-	commitSHA := os.Args[3]
-
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	// Delete the manual tag
-	err = storage.DeleteManualChangeSet(db, promptID, commitSHA)
-	if err != nil {
-		if strings.Contains(err.Error(), "no manual tag found") {
-			fmt.Fprintf(os.Stderr, "Error: No manual tag found for prompt %s and commit %s\n", promptID, commitSHA)
-		} else if strings.Contains(err.Error(), "not a manual tag") {
-			fmt.Fprintf(os.Stderr, "Error: Cannot untag - this is %s\n", err.Error())
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: Failed to untag: %v\n", err)
-		}
-		os.Exit(1)
-	}
-
-	fmt.Printf("Untagged prompt %s from commit %s\n", promptID, commitSHA)
+	fmt.Fprintln(os.Stderr, "Manual untagging not yet implemented in v2 architecture")
+	fmt.Fprintln(os.Stderr, "Planned usage:")
+	fmt.Fprintln(os.Stderr, "  prov untag <commit-sha> <prompt-id>")
+	os.Exit(1)
 }

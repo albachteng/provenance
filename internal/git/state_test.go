@@ -10,7 +10,7 @@ import (
 
 func TestCaptureGitState(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	state, err := CaptureGitState(repo)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestCaptureGitState(t *testing.T) {
 
 func TestCaptureGitStateDirtyRepo(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	testFile := filepath.Join(repo, "uncommitted.txt")
 	if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
@@ -74,7 +74,7 @@ func TestCaptureGitStateDirtyRepo(t *testing.T) {
 
 func TestCaptureGitStateModifiedFile(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	readmePath := filepath.Join(repo, "README.md")
 	if err := os.WriteFile(readmePath, []byte("Modified content"), 0644); err != nil {
@@ -105,7 +105,7 @@ func TestCaptureGitStateModifiedFile(t *testing.T) {
 
 func TestCaptureGitStateDiffSummary(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	readmePath := filepath.Join(repo, "README.md")
 	if err := os.WriteFile(readmePath, []byte("Line 1\nLine 2\nLine 3\n"), 0644); err != nil {
@@ -128,7 +128,7 @@ func TestCaptureGitStateDiffSummary(t *testing.T) {
 
 func TestCaptureGitStateRemoteTracking(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	state, err := CaptureGitState(repo)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestCaptureGitStateNonRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	_, err = CaptureGitState(tmpDir)
 	if err == nil {
@@ -158,7 +158,7 @@ func TestCaptureGitStateNonRepo(t *testing.T) {
 
 func TestCaptureGitStateAheadBehind(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	state, err := CaptureGitState(repo)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestCaptureGitStateAheadBehind(t *testing.T) {
 
 func TestCaptureGitStateDetachedHead(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	testFile := filepath.Join(repo, "test.txt")
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
@@ -209,7 +209,7 @@ func TestCaptureGitStateDetachedHead(t *testing.T) {
 
 func TestCaptureGitStateMergeConflict(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	runGit(t, repo, "checkout", "-b", "branch-a")
 	readmePath := filepath.Join(repo, "README.md")
@@ -246,10 +246,10 @@ func TestCaptureGitStateMergeConflict(t *testing.T) {
 
 func TestCaptureGitStateWithSubmodule(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	submoduleRepo := setupTestRepo(t)
-	defer os.RemoveAll(submoduleRepo)
+	defer func() { _ = os.RemoveAll(submoduleRepo) }() //nolint:errcheck
 
 	// Allow file:// protocol for local submodules (test only)
 	runGit(t, repo, "config", "--global", "protocol.file.allow", "always")
@@ -280,13 +280,13 @@ func TestCaptureGitStatePermissionError(t *testing.T) {
 	}
 
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	gitDir := filepath.Join(repo, ".git")
 	if err := os.Chmod(gitDir, 0000); err != nil {
 		t.Fatalf("Failed to change permissions: %v", err)
 	}
-	defer os.Chmod(gitDir, 0755) // Restore for cleanup
+	defer func() { _ = os.Chmod(gitDir, 0755) }() //nolint:errcheck // Restore for cleanup
 
 	_, err := CaptureGitState(repo)
 	if err == nil {
@@ -296,7 +296,7 @@ func TestCaptureGitStatePermissionError(t *testing.T) {
 
 func TestCaptureGitStateCorruptedRepo(t *testing.T) {
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	headFile := filepath.Join(repo, ".git", "HEAD")
 	if err := os.Remove(headFile); err != nil {
@@ -313,12 +313,12 @@ func TestCaptureGitStateGitNotInstalled(t *testing.T) {
 	// We'll test this by temporarily modifying PATH to exclude git
 
 	repo := setupTestRepo(t)
-	defer os.RemoveAll(repo)
+	defer func() { _ = os.RemoveAll(repo) }() //nolint:errcheck
 
 	originalPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", originalPath)
+	defer func() { _ = os.Setenv("PATH", originalPath) }() //nolint:errcheck
 
-	os.Setenv("PATH", "")
+	_ = os.Setenv("PATH", "") //nolint:errcheck
 
 	_, err := CaptureGitState(repo)
 	if err == nil {
@@ -336,7 +336,7 @@ func TestCaptureGitStateEmptyRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }() //nolint:errcheck
 
 	runGit(t, tmpDir, "init", "-b", "main")
 	runGit(t, tmpDir, "config", "user.email", "test@example.com")

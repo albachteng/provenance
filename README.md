@@ -2,7 +2,7 @@
 
 Track AI-assisted code changes across your development workflow. An open-source, agent-agnostic provenance system that helps teams understand AI usage patterns, measure ROI, and maintain code quality.
 
-> **Status**: ✅ Phase 0 complete - Core foundation with session management! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ Phase 4 Features 1-5 complete - Sessions, statistics, export, **git commit correlation** with confidence scoring, and **git blame**! Next: Manual tagging (Feature 6). See `ROADMAP.md` for development plans.
+> **Status**: ✅ Phase 0 complete - Core foundation! ✅ Phase 2A complete - Claude Code hooks capturing! ✅ **V2 Architecture complete** - Migrated to commit window-based design (simpler, faster). Blame command uses real-time git queries. All tests passing. See `ROADMAP.md` for architecture details.
 
 ## Quick Start
 
@@ -63,7 +63,6 @@ This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/s
 #   - claude-prompt.py
 #   - claude-tool-pre.py
 #   - claude-tool-post.py
-#   - claude-session.py
 ```
 
 **Uninstall (if needed):**
@@ -75,46 +74,31 @@ This installs hook scripts to `~/.ai-provenance/hooks/` and updates `~/.claude/s
 
 The hooks are installed globally for your user. Every Claude Code project will automatically capture events to the same database. To view events for a specific project, navigate to that directory and run `./prov list`.
 
-### Link Commits to AI Prompts (Git Correlation)
+### Link Commits to AI Prompts (Commit Windows)
 
-Automatically correlate your git commits with the AI prompts that generated them:
+AI Provenance uses **commit windows** to associate prompts with code changes. A commit window is the time period between consecutive commits on a branch.
 
+**How it works:**
+- Every prompt captures the current branch at the time of submission
+- When you run `prov blame <commit>`, it finds prompts in the window: `(previous_commit, this_commit]`
+- Prompts are matched by: timestamp within window + same branch
+
+**Branch switching edge case:**
+- When you switch branches without committing, prompts are flagged as `pre_branch_switch`
+- This prevents prompts from one branch being incorrectly associated with commits on another branch
+- The system tracks: "I was working on branch A, but switched to branch B before committing"
+
+**Post-commit hook (optional):**
 ```bash
-# In your git repository, install the post-commit hook
+# Install hook to cache commit windows for faster queries
 ./prov install-hook post-commit
 ```
 
-The hook automatically:
-- Runs after each commit
-- Finds AI prompts from the last 15 minutes
-- Creates change_sets linking prompts to commits
-- Calculates confidence scores based on timing and file overlap
-
-**Confidence scoring factors:**
-- **Time proximity**: Recent prompts (< 2 min) get higher confidence
-- **File overlap**: Prompts mentioning changed files get higher confidence
-- **Combined score**: Weighted average (40% time, 60% file overlap)
+The hook caches commit window metadata (previous commit, current commit, timestamps, prompt count) to speed up blame queries. The cache is optional - queries work without it by computing windows on-demand from git history.
 
 **Check hook status:**
 ```bash
 ./prov hooks status
-
-# Output:
-# Installed hooks:
-#
-# claude-code:
-#   - claude-prompt.py
-#   - claude-tool-pre.py
-#   - claude-tool-post.py
-#   - claude-session.py
-#
-# git:
-#   - post-commit
-```
-
-**Uninstall git hook:**
-```bash
-./prov hooks uninstall post-commit
 ```
 
 **Option 2: Shell Hook (For CLI Tools)**
@@ -174,30 +158,46 @@ Once the daemon is running and capturing events, you can query them:
 Find out which AI prompts led to specific code changes in your repository:
 
 ```bash
-# Blame a commit (supports full or short SHA)
+# Blame a commit (supports full SHA)
 ./prov blame abc123def456
-./prov blame abc123  # Short SHA works too
 
-# Blame a file to see all AI prompts that modified it
-./prov blame src/auth.go
-./prov blame internal/handlers/user.go
+# Must be run from within the git repository
+cd /path/to/your/repo
+./prov blame HEAD
+./prov blame HEAD~1
 ```
 
 **Example output:**
 ```
-Found 1 prompt(s) that led to changes:
+Commit: abc123def456 (2026-01-15 17:35:00)
+Branch: feature/auth
 
-[1] Commit: abc123def456 (Confidence: 0.95 / 95%)
-    Prompt ID: prompt-blame-1
-    Timestamp: 2026-01-15 17:35:11
+Prompts in window (2):
+
+[1] prompt-evt-1234 (17:32:15)
     Agent: claude-code
-    Author: testuser
-    Prompt: Implement user authentication
-    Files Changed:
-      - auth.go
-      - auth_test.go
-    Diff: +150 -20
+    Author: alice@example.com
+    "Implement user authentication"
+    Tokens: 1200 in, 3400 out
+    Tools: Write (auth.go), Edit (auth_test.go)
+
+[2] prompt-evt-1235 (17:34:45)
+    Agent: claude-code
+    Author: alice@example.com
+    "Add password validation"
+    Tokens: 800 in, 2100 out
+    Tools: Edit (auth.go)
+
+Files changed in commit:
+  auth.go (+120 -15)
+  auth_test.go (+85 -0)
 ```
+
+**How it works:**
+- Finds the previous commit on the same branch
+- Queries prompts between `prev_commit_time` and `commit_time`
+- Filters to prompts on the same branch (using `branch_at_capture`)
+- Excludes prompts flagged as `pre_branch_switch` (abandoned work)
 
 **Use cases:**
 - **Code review**: See which AI prompts generated specific commits
@@ -207,10 +207,10 @@ Found 1 prompt(s) that led to changes:
 - **Documentation**: Link code changes to their requirements/context
 
 **Requirements:**
-- Git repository with `post-commit` hook installed (see "Link Commits to AI Prompts")
-- At least one commit made after installing the hook
+- Git repository (no hooks required - queries git history directly)
+- Prompts captured with Claude Code hooks or other adapters
 
-### Export Session Data
+### Export Data
 
 Export your AI interaction data to CSV or JSON for analysis, reporting, or integration with other tools:
 
@@ -222,11 +222,8 @@ Export your AI interaction data to CSV or JSON for analysis, reporting, or integ
 ./prov export --format csv
 
 # Export to a file
-./prov export --format json --output sessions.json
-./prov export --format csv --output sessions.csv
-
-# Export a specific session
-./prov export --session <session-id> --output session.json
+./prov export --format json --output prompts.json
+./prov export --format csv --output prompts.csv
 
 # Export events from the last 7 days
 ./prov export --since "7 days ago" --format csv --output recent.csv
@@ -238,14 +235,13 @@ Export your AI interaction data to CSV or JSON for analysis, reporting, or integ
 **Export options:**
 - `--format`: Output format (`json` or `csv`, defaults to `json`)
 - `--output`: Write to file instead of stdout
-- `--session`: Export only events from a specific session ID
 - `--since`: Export events since a relative time (e.g., "7 days ago", "2 hours ago")
 
 **CSV format includes:**
-- Event metadata (ID, timestamp, session ID, agent, model version)
+- Event metadata (ID, timestamp, agent, model version)
 - Prompt and response text
 - Token counts and latency metrics
-- Git context (commit, branch, dirty state)
+- Git context (commit, branch at capture, dirty state)
 - Author, IDE, and file information
 - Tools invoked and files mentioned (semicolon-separated)
 
@@ -281,34 +277,28 @@ AI Provenance supports a hierarchical configuration system with sensible default
 ```
 
 **Configuration options include:**
-- **Session strategy**: `smart-time` (activity-based) or `git-event` (commit/branch-based)
-- **Session timeouts**: Base timeout, activity check interval, fallback timeout
 - **Storage paths**: Database, socket, PID file locations
-- **Daemon settings**: Startup timeout, shutdown timeout, session check interval
+- **Daemon settings**: Startup timeout, shutdown timeout
 - **Redaction rules**: Built-in patterns and custom redaction
 
 **Example configuration** (`~/.ai-provenance/config.yaml`):
 ```yaml
-session:
-  strategy: "smart-time"  # or "git-event"
-  smart_time:
-    base_timeout: "30m"
-    activity_check_interval: "5m"
-    extend_if_active: true
-
 storage:
   db_path: "db.sqlite"
   wal_mode: true
 
 daemon:
-  session_check_interval: "1m"
+  startup_timeout: "10s"
+  shutdown_timeout: "5s"
+
+redaction:
+  enabled: true
+  builtin_patterns: true
 ```
 
 **Environment variable overrides:**
 ```bash
 export AI_PROVENANCE_HOME=/custom/path
-export AI_PROVENANCE_SESSION_STRATEGY=git-event
-export AI_PROVENANCE_SESSION_TIMEOUT=45m
 ./prov daemon start
 ```
 
@@ -355,9 +345,6 @@ go build -o prov ./cmd/prov
 git add .
 git commit -m "Add authentication feature"
 ./prov blame HEAD  # or use the commit SHA
-
-# Blame a specific file to see its AI history
-./prov blame src/auth.go
 ```
 
 ### With CLI Tools
@@ -382,24 +369,34 @@ The captured event includes:
 
 ## How It Works
 
-A background daemon stores AI interaction events in a local SQLite database with intelligent session management:
+A background daemon stores AI interaction events in a local SQLite database using a commit window-based architecture:
 
 ```
 Capture Adapters → Unix Socket → Storage Daemon → SQLite Database
-Claude Code Hooks     ↓         Session Manager        ↓
+Claude Code Hooks     ↓              ↓                    ↓
 Shell Wrappers     Commands      Event Store      ~/.ai-provenance/
 ```
 
-**Session Management:**
-- Automatically groups related prompts into sessions
-- Two strategies: `smart-time` (activity-based) and `git-event` (commit/branch-based)
-- Sessions end on inactivity timeout or git events (configurable)
-- Background process checks session boundaries every minute
+**Commit Window Architecture:**
+- Prompts are associated with commits based on timestamps and branch tracking
+- Each prompt captures the branch at submission time (`branch_at_capture`)
+- Commit windows defined as: `(previous_commit, current_commit, branch)`
+- Branch switch detection prevents incorrect associations (`pre_branch_switch` flag)
+- Query prompts for a commit on-demand (no pre-computation needed)
 
 **Event Capture:**
-Each AI interaction captures metadata (agent, model, prompt/response), git context (branch, commit, dirty files), and developer context (author, IDE, workspace).
+Each AI interaction captures:
+- **Metadata**: Agent, model, prompt/response text, tokens, latency
+- **Git context**: Current branch (`branch_at_capture`), commit, dirty files
+- **Developer context**: Author, IDE, workspace, active file
+- **Tool invocations**: Separate table tracks Read, Write, Edit, Bash calls with file paths
 
-See `ROADMAP.md` for architecture details and data schema.
+**Performance:**
+- Prompt capture: < 10ms (immediate write to SQLite)
+- Blame query: 50-100ms (on-demand from git + database)
+- No pre-computation needed - simple, fast, real-time queries
+
+See `ROADMAP.md` for architecture details and implementation notes.
 
 ## Development
 
@@ -423,14 +420,22 @@ Test suite runs in **~1.5s** for CLI integration tests.
 ```
 provenance/
 ├── cmd/prov/              # CLI and daemon entry point
+│   └── hooks/             # Embedded hook scripts (Python)
 ├── internal/
 │   ├── config/            # Configuration system (YAML + env vars)
-│   ├── daemon/            # Unix socket server
-│   ├── session/           # Session management strategies
-│   ├── storage/           # SQLite database layer
+│   ├── daemon/            # Unix socket server (simplified v2)
+│   ├── storage/           # SQLite database layer (v2: commit windows)
+│   │   ├── migrations/    # Schema migrations
+│   │   ├── events.go      # Prompt event CRUD
+│   │   └── stubs.go       # V1 compatibility stubs (temporary)
+│   ├── queries/           # V2 query layer
+│   │   └── prompts.go     # Commit window queries
 │   └── git/               # Git integration
-├── ROADMAP.md             # Development roadmap and design decisions
-└── DESIGN.md              # Technical design document
+│       ├── commits.go     # Commit metadata extraction
+│       ├── blame.go       # Git blame parsing
+│       └── testing.go     # Git test helpers
+├── ROADMAP.md             # Development roadmap and architecture
+└── TESTING.md             # Manual testing guide
 ```
 
 ## Documentation

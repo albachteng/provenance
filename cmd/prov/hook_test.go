@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,19 +53,19 @@ func TestHookUnsupportedShell(t *testing.T) {
 func TestCommandWrapper(t *testing.T) {
 	tmpDir := setupTestEnv(t)
 	db := setupTestDB(t, tmpDir)
-	defer db.Close()
+	defer func() { _ = db.Close() }() //nolint:errcheck
 
 	_, err := runCLI(t, "daemon", "start")
 	if err != nil {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
 	defer func() {
-		runCLI(t, "daemon", "stop")
+		_, _ = runCLI(t, "daemon", "stop") //nolint:errcheck
 		// Give daemon time to fully shutdown and clean up
 		time.Sleep(200 * time.Millisecond)
 		// Ensure socket is removed
 		socketPath := filepath.Join(tmpDir, "daemon.sock")
-		os.Remove(socketPath)
+		_ = os.Remove(socketPath) //nolint:errcheck
 	}()
 
 	waitForDaemonReady(t, tmpDir)
@@ -97,12 +96,12 @@ func TestCommandWrapperExitCode(t *testing.T) {
 		t.Fatalf("Failed to start daemon: %v", err)
 	}
 	defer func() {
-		runCLI(t, "daemon", "stop")
+		_, _ = runCLI(t, "daemon", "stop") //nolint:errcheck
 		// Give daemon time to fully shutdown and clean up
 		time.Sleep(200 * time.Millisecond)
 		// Ensure socket is removed
 		socketPath := filepath.Join(tmpDir, "daemon.sock")
-		os.Remove(socketPath)
+		_ = os.Remove(socketPath) //nolint:errcheck
 	}()
 
 	waitForDaemonReady(t, tmpDir)
@@ -116,162 +115,8 @@ func TestCommandWrapperExitCode(t *testing.T) {
 	// We can't easily check the exact exit code in Go, but we verified it's non-zero
 }
 
-// TestSessionCreation tests that first AI invocation creates a session
-func TestSessionCreation(t *testing.T) {
-	t.Skip("TODO: Session management - migrations path issues when changing directories")
-
-	tmpDir := setupTestEnv(t)
-	db := setupTestDB(t, tmpDir)
-	defer db.Close()
-
-	gitDir := filepath.Join(tmpDir, "test-repo")
-	if err := os.MkdirAll(gitDir, 0755); err != nil {
-		t.Fatalf("Failed to create git dir: %v", err)
-	}
-	if err := os.Chdir(gitDir); err != nil {
-		t.Fatalf("Failed to change dir: %v", err)
-	}
-
-	runCommand(t, "git", "init")
-	runCommand(t, "git", "config", "user.email", "test@example.com")
-	runCommand(t, "git", "config", "user.name", "Test User")
-
-	_, err := runCLI(t, "daemon", "start")
-	if err != nil {
-		t.Fatalf("Failed to start daemon: %v", err)
-	}
-	defer runCLI(t, "daemon", "stop")
-
-	waitForDaemonReady(t, tmpDir)
-
-	_, err = runCLI(t, "wrap", "claude-code", "echo", "first prompt")
-	if err != nil {
-		t.Fatalf("wrap command failed: %v", err)
-	}
-
-	waitForSessionInDB(t, db)
-
-	rows, err := db.Query(`
-		SELECT id, repo_path, total_prompts
-		FROM sessions
-		ORDER BY start_time DESC
-		LIMIT 1
-	`)
-	if err != nil {
-		t.Fatalf("Failed to query sessions: %v", err)
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		t.Fatal("Expected session to be created")
-	}
-
-	var id, repoPath string
-	var totalPrompts int
-	if err := rows.Scan(&id, &repoPath, &totalPrompts); err != nil {
-		t.Fatalf("Failed to scan session: %v", err)
-	}
-
-	if repoPath != gitDir {
-		t.Errorf("Expected repo_path '%s', got: %s", gitDir, repoPath)
-	}
-
-	if totalPrompts < 1 {
-		t.Errorf("Expected at least 1 prompt in session, got: %d", totalPrompts)
-	}
-}
-
-// TestSessionLinking tests that multiple prompts link to same session
-func TestSessionLinking(t *testing.T) {
-	t.Skip("TODO: Session management - migrations path issues when changing directories")
-
-	tmpDir := setupTestEnv(t)
-	db := setupTestDB(t, tmpDir)
-	defer db.Close()
-
-	gitDir := filepath.Join(tmpDir, "test-repo")
-	if err := os.MkdirAll(gitDir, 0755); err != nil {
-		t.Fatalf("Failed to create git dir: %v", err)
-	}
-	if err := os.Chdir(gitDir); err != nil {
-		t.Fatalf("Failed to change dir: %v", err)
-	}
-
-	runCommand(t, "git", "init")
-	runCommand(t, "git", "config", "user.email", "test@example.com")
-	runCommand(t, "git", "config", "user.name", "Test User")
-
-	_, err := runCLI(t, "daemon", "start")
-	if err != nil {
-		t.Fatalf("Failed to start daemon: %v", err)
-	}
-	defer runCLI(t, "daemon", "stop")
-
-	waitForDaemonReady(t, tmpDir)
-
-	runCLI(t, "wrap", "claude-code", "echo", "first prompt")
-	runCLI(t, "wrap", "claude-code", "echo", "second prompt")
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		var count int
-		err := db.QueryRow(`SELECT COUNT(*) FROM prompt_events`).Scan(&count)
-		if err == nil && count >= 2 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	rows, err := db.Query(`
-		SELECT session_id
-		FROM prompt_events
-		ORDER BY timestamp
-	`)
-	if err != nil {
-		t.Fatalf("Failed to query events: %v", err)
-	}
-	defer rows.Close()
-
-	sessionIDs := make(map[string]int)
-	for rows.Next() {
-		var sessionID string
-		if err := rows.Scan(&sessionID); err != nil {
-			t.Fatalf("Failed to scan session_id: %v", err)
-		}
-		sessionIDs[sessionID]++
-	}
-
-	if len(sessionIDs) != 1 {
-		t.Errorf("Expected all events to share same session, got %d different sessions: %v", len(sessionIDs), sessionIDs)
-	}
-
-	for sessionID, count := range sessionIDs {
-		var totalPrompts int
-		err := db.QueryRow(`
-			SELECT total_prompts
-			FROM sessions
-			WHERE id = ?
-		`, sessionID).Scan(&totalPrompts)
-
-		if err != nil {
-			t.Fatalf("Failed to query session: %v", err)
-		}
-
-		if totalPrompts != count {
-			t.Errorf("Session total_prompts (%d) doesn't match event count (%d)", totalPrompts, count)
-		}
-	}
-}
-
-// Helper function to run shell commands (for git setup)
-func runCommand(t *testing.T, name string, args ...string) {
-	t.Helper()
-
-	cmd := exec.Command(name, args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("Command failed: %s %v: %v\nOutput: %s", name, args, err, output)
-	}
-}
+// V2 NOTE: Session tests removed - v2 uses commit windows instead of sessions
+// Removed tests: TestSessionCreation, TestSessionLinking
 
 // waitForDaemonReady polls until daemon socket is connectable
 func waitForDaemonReady(t *testing.T, tmpDir string) {
@@ -314,16 +159,16 @@ func waitForEventInDB(t *testing.T, db *sql.DB, checkFunc func(agent, promptText
 		for rows.Next() {
 			var agent, promptText string
 			if err := rows.Scan(&agent, &promptText); err != nil {
-				rows.Close()
+				_ = rows.Close() //nolint:errcheck
 				t.Fatalf("Failed to scan row: %v", err)
 			}
 
 			if checkFunc(agent, promptText) {
-				rows.Close()
+				_ = rows.Close() //nolint:errcheck
 				return
 			}
 		}
-		rows.Close()
+		_ = rows.Close() //nolint:errcheck
 
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -332,31 +177,4 @@ func waitForEventInDB(t *testing.T, db *sql.DB, checkFunc func(agent, promptText
 }
 
 // waitForSessionInDB polls until a session appears in the database
-func waitForSessionInDB(t *testing.T, db *sql.DB) string {
-	t.Helper()
-
-	deadline := time.Now().Add(2 * time.Second)
-
-	for time.Now().Before(deadline) {
-		var sessionID string
-		err := db.QueryRow(`
-			SELECT id
-			FROM sessions
-			ORDER BY start_time DESC
-			LIMIT 1
-		`).Scan(&sessionID)
-
-		if err == nil {
-			return sessionID
-		}
-
-		if err != sql.ErrNoRows {
-			t.Fatalf("Failed to query sessions: %v", err)
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	t.Fatalf("Session not created within timeout")
-	return ""
-}
+// V2 NOTE: waitForSessionInDB helper removed - no longer needed without session tests
