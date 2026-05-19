@@ -15,7 +15,6 @@ var ErrNotFound = errors.New("record not found")
 type PromptEvent struct {
 	ID        string
 	Timestamp time.Time
-	SessionID string
 
 	// AI metadata
 	Agent        string
@@ -75,7 +74,7 @@ func StorePromptEvent(db *sql.DB, event *PromptEvent) error {
 
 	query := `
 		INSERT INTO prompt_events (
-			id, timestamp, session_id,
+			id, timestamp,
 			agent, model_version, prompt_text, response_text,
 			tokens_in, tokens_out, latency_ms,
 			repo_path, git_commit, git_branch, git_dirty, dirty_files,
@@ -83,7 +82,7 @@ func StorePromptEvent(db *sql.DB, event *PromptEvent) error {
 			prompt_type, tools_invoked, files_mentioned,
 			branch_at_capture, pre_branch_switch
 		) VALUES (
-			?, ?, ?,
+			?, ?,
 			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?, ?, ?, ?,
@@ -95,7 +94,7 @@ func StorePromptEvent(db *sql.DB, event *PromptEvent) error {
 
 	_, err = db.Exec(
 		query,
-		event.ID, event.Timestamp.Unix(), event.SessionID,
+		event.ID, event.Timestamp.Unix(),
 		event.Agent, event.ModelVersion, event.PromptText, event.ResponseText,
 		event.TokensIn, event.TokensOut, event.LatencyMs,
 		event.RepoPath, event.GitCommit, event.GitBranch, event.GitDirty, string(dirtyFilesJSON),
@@ -114,7 +113,7 @@ func StorePromptEvent(db *sql.DB, event *PromptEvent) error {
 func GetPromptEvent(db *sql.DB, id string) (*PromptEvent, error) {
 	query := `
 		SELECT
-			id, timestamp, session_id,
+			id, timestamp,
 			agent, model_version, prompt_text, response_text,
 			tokens_in, tokens_out, latency_ms,
 			repo_path, git_commit, git_branch, git_dirty, dirty_files,
@@ -130,7 +129,7 @@ func GetPromptEvent(db *sql.DB, id string) (*PromptEvent, error) {
 	var dirtyFilesJSON, workspaceFilesJSON, toolsInvokedJSON, filesMentionedJSON string
 
 	err := db.QueryRow(query, id).Scan(
-		&event.ID, &timestampUnix, &event.SessionID,
+		&event.ID, &timestampUnix,
 		&event.Agent, &event.ModelVersion, &event.PromptText, &event.ResponseText,
 		&event.TokensIn, &event.TokensOut, &event.LatencyMs,
 		&event.RepoPath, &event.GitCommit, &event.GitBranch, &event.GitDirty, &dirtyFilesJSON,
@@ -169,10 +168,10 @@ func GetPromptEvent(db *sql.DB, id string) (*PromptEvent, error) {
 // ListPromptEvents retrieves all prompt events for a session in chronological order
 // NOTE: This function is deprecated in v2 architecture (sessions removed)
 // Use GetPromptsForCommitWindow or similar query functions instead
-func ListPromptEvents(db *sql.DB, sessionID string) ([]*PromptEvent, error) {
+func ListPromptEvents(db *sql.DB) ([]*PromptEvent, error) {
 	query := `
 		SELECT
-			id, timestamp, session_id,
+			id, timestamp,
 			agent, model_version, prompt_text, response_text,
 			tokens_in, tokens_out, latency_ms,
 			repo_path, git_commit, git_branch, git_dirty, dirty_files,
@@ -180,11 +179,10 @@ func ListPromptEvents(db *sql.DB, sessionID string) ([]*PromptEvent, error) {
 			prompt_type, tools_invoked, files_mentioned,
 			branch_at_capture, pre_branch_switch
 		FROM prompt_events
-		WHERE session_id = ?
 		ORDER BY timestamp ASC
 	`
 
-	rows, err := db.Query(query, sessionID)
+	rows, err := db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query prompt events: %w", err)
 	}
@@ -197,7 +195,7 @@ func ListPromptEvents(db *sql.DB, sessionID string) ([]*PromptEvent, error) {
 		var dirtyFilesJSON, workspaceFilesJSON, toolsInvokedJSON, filesMentionedJSON string
 
 		err := rows.Scan(
-			&event.ID, &timestampUnix, &event.SessionID,
+			&event.ID, &timestampUnix,
 			&event.Agent, &event.ModelVersion, &event.PromptText, &event.ResponseText,
 			&event.TokensIn, &event.TokensOut, &event.LatencyMs,
 			&event.RepoPath, &event.GitCommit, &event.GitBranch, &event.GitDirty, &dirtyFilesJSON,

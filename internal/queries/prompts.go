@@ -44,7 +44,7 @@ func GetPromptsForCommit(db *sql.DB, repoPath, commitSHA, branch string) ([]*sto
 	// Filters: same branch, not pre_branch_switch, same repo
 	query := `
 		SELECT
-			id, timestamp, session_id,
+			id, timestamp,
 			agent, model_version, prompt_text, response_text,
 			tokens_in, tokens_out, latency_ms,
 			repo_path, git_commit, git_branch, git_dirty, dirty_files,
@@ -79,7 +79,7 @@ func GetPromptsForCommit(db *sql.DB, repoPath, commitSHA, branch string) ([]*sto
 		var dirtyFilesJSON, workspaceFilesJSON, toolsInvokedJSON, filesMentionedJSON string
 
 		err := rows.Scan(
-			&event.ID, &timestampUnix, &event.SessionID,
+			&event.ID, &timestampUnix,
 			&event.Agent, &event.ModelVersion, &event.PromptText, &event.ResponseText,
 			&event.TokensIn, &event.TokensOut, &event.LatencyMs,
 			&event.RepoPath, &event.GitCommit, &event.GitBranch, &event.GitDirty, &dirtyFilesJSON,

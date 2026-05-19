@@ -112,7 +112,7 @@ func TestPostCommitHookExecution(t *testing.T) {
 
 	// Start daemon for this test
 	tmpDir := t.TempDir()
-	_ = os.Setenv("AI_PROVENANCE_HOME", tmpDir) //nolint:errcheck
+	_ = os.Setenv("AI_PROVENANCE_HOME", tmpDir)              //nolint:errcheck
 	defer func() { _ = os.Unsetenv("AI_PROVENANCE_HOME") }() //nolint:errcheck
 
 	// Create test repo

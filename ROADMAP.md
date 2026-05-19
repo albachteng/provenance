@@ -329,6 +329,252 @@ Now that v2 core is complete, potential future improvements:
 
 ---
 
+## V2 Feature Parity Tasks (Next Priority)
+
+**Goal**: Restore v1 functionality with v2 commit window architecture
+
+**Status**: 23 tests currently skipped, awaiting v2 reimplementation (11 high priority, 12 deferred)
+
+### Skipped Tests Requiring Implementation
+
+The following tests from v1 are currently skipped and need to be reimplemented using the v2 commit window approach:
+
+#### Stats Commands (5 tests)
+Location: `cmd/prov/cli_test.go:314-331`
+
+1. **TestCLIStatsRepo** - `prov stats` for repository-wide statistics
+   - **V2 Approach**: Query prompts grouped by branch and time windows
+   - **Implementation**: `cmd/prov/commands.go:cmdStats()`
+   - **Deliverable**: Show aggregate metrics (tokens, prompts, files, tools) across all commit windows
+
+2. **TestCLIStatsSession** - `prov stats --session <id>` for session-specific stats
+   - **V2 Decision**: May be replaced with `prov stats --branch <name>` or `prov window show <commit>`
+   - **Consider**: Do we need session-level stats in v2, or is branch/window sufficient?
+
+3. **TestCLIStatsSince** - `prov stats --since "7 days ago"` for time-filtered statistics
+   - **V2 Approach**: Filter prompt_events by timestamp, group by branch
+   - **Implementation**: Time parsing already exists (removed but needs restoration)
+   - **Deliverable**: Show stats for prompts within specified timeframe
+
+4. **TestCLIStatsNoData** - `prov stats` with no data should show empty/zero stats
+   - **V2 Approach**: Handle empty result sets gracefully
+   - **Deliverable**: User-friendly message when no prompts found
+
+5. **TestCLISessionListTableAlignment** - Session list formatting (may be deprecated)
+   - **V2 Decision**: Likely removed entirely, replaced with `prov branch list` or `prov window list`
+   - **Consider**: What's the v2 equivalent for "list all work sessions"?
+
+#### Export Commands (6 tests)
+Location: `cmd/prov/cli_test.go:334-355`
+
+6. **TestCLIExportJSON** - `prov export --format json` exports all prompts as JSON
+   - **V2 Approach**: SELECT all from prompt_events, serialize to JSON
+   - **Implementation**: `cmd/prov/commands.go:cmdExport()`
+   - **Deliverable**: JSON array of all prompt events with full fields
+
+7. **TestCLIExportCSV** - `prov export --format csv` exports all prompts as CSV
+   - **V2 Approach**: SELECT all from prompt_events, serialize to CSV with headers
+   - **Implementation**: CSV formatting with proper escaping
+   - **Deliverable**: CSV with headers and escaped fields
+
+8. **TestCLIExportSession** - `prov export --session <id>` exports specific session
+   - **V2 Decision**: May be replaced with `prov export --branch <name>` or `prov export --window <commit>`
+   - **Consider**: How to export a logical "unit of work" in v2?
+
+9. **TestCLIExportSince** - `prov export --since "7 days ago"` exports time-filtered data
+   - **V2 Approach**: WHERE timestamp >= ? in query
+   - **Implementation**: Time parsing + filtered SELECT
+   - **Deliverable**: JSON/CSV of prompts within timeframe
+
+10. **TestCLIExportToFile** - `prov export --output report.json` writes to file
+    - **V2 Approach**: Add --output flag, write to file instead of stdout
+    - **Implementation**: File I/O with proper error handling
+    - **Deliverable**: Confirm message with file path
+
+11. **TestCLIExportNoData** - `prov export` with no data returns empty array
+    - **V2 Approach**: Return [] for JSON, empty for CSV (with headers)
+    - **Deliverable**: Handle empty result sets gracefully
+
+#### Manual Tagging Commands (12 tests) - Feature 6
+Location: `cmd/prov/tag_test.go:12-69`
+
+**Note**: These tests are part of Feature 6 (Manual Tagging) and are currently deferred. They represent user override capabilities for when automatic commit window detection is incorrect.
+
+12. **TestTagPromptWithCommit** - `prov tag <prompt-id> --commit <sha>` manually associates prompt with commit
+13. **TestTagPromptWithFile** - `prov tag <prompt-id> --file <path>` manually associates prompt with file
+14. **TestTagNoPromptID** - Error handling when no prompt ID provided
+15. **TestTagNoTarget** - Error handling when neither commit nor file specified
+16. **TestTagBothTargets** - Error handling when both commit and file specified
+17. **TestTagNonexistentPrompt** - Error handling for non-existent prompt IDs
+18. **TestTagAppearsInBlame** - Verify manually tagged prompts appear in `prov blame` output
+19. **TestUntagPrompt** - `prov untag <prompt-id> --commit <sha>` removes manual tag
+20. **TestUntagNoPromptID** - Error handling for untag without prompt ID
+21. **TestUntagNoCommit** - Error handling for untag without commit
+22. **TestUntagNonexistentTag** - Error handling for removing non-existent tag
+23. **TestUntagAutoCorrelation** - Verify untag only removes manual tags, not automatic correlations
+
+**V2 Implementation Approach**:
+- Update `branch_at_capture` field directly (no separate tags table)
+- Toggle `pre_branch_switch` flag if user knows prompt was committed
+- Simple field updates, no correlation scoring
+
+**Estimated Work**: 3-4 hours (after Feature 6 design decisions are made)
+
+### Implementation Priority
+
+**High Priority** (restore core analytics):
+1. TestCLIStatsRepo - Basic stats command ⭐
+2. TestCLIStatsSince - Time-filtered stats ⭐
+3. TestCLIExportJSON - JSON export ⭐
+4. TestCLIExportCSV - CSV export ⭐
+5. TestCLIExportSince - Time-filtered export ⭐
+6. TestCLIExportToFile - File output ⭐
+
+**Medium Priority** (nice-to-have features):
+7. TestCLIStatsNoData - Empty state handling
+8. TestCLIExportNoData - Empty state handling
+
+**Design Decision Required** (v1 → v2 concept mapping):
+9. TestCLIStatsSession - What's the v2 equivalent?
+10. TestCLIExportSession - What's the v2 equivalent?
+11. TestCLISessionListTableAlignment - Likely deprecated
+
+**Deferred** (Feature 6 - Manual Tagging):
+12-23. All tag/untag tests - Deferred to Feature 6 implementation
+
+### Estimated Work
+
+**Stats commands** (tests 1-5): 4-6 hours
+- Restore time parsing helper (`parseTimeString`)
+- Restore display helper (`displayStats`)
+- Implement commit-window-based aggregation queries
+- Add branch filtering support
+
+**Export commands** (tests 6-11): 4-6 hours
+- Restore JSON/CSV serialization helpers
+- Implement filtered queries (by time, by branch)
+- Add file output support
+- Handle empty result sets
+
+**Design decisions** (tests 9-11): 2-3 hours
+- Decide on v2 equivalents for session-based commands
+- Update command help text and documentation
+- Consider new commands: `prov branch stats`, `prov window export`
+
+**Manual tagging** (tests 12-23): 3-4 hours
+- Deferred to Feature 6 implementation
+- Not blocking feature parity
+
+**Total estimated time**: 10-15 hours (excluding deferred Feature 6 work)
+
+### Success Criteria
+
+- [ ] All high-priority tests passing (6 tests) ⭐
+- [ ] Empty state handling tests passing (2 tests)
+- [ ] Design decisions documented for session-based commands (3 tests)
+- [ ] Command help text updated to reflect v2 concepts
+- [ ] User can run `prov stats` and `prov export` commands
+- [ ] Feature parity with v1 stats and export functionality achieved (11/23 tests)
+- [ ] Manual tagging tests (12/23) remain deferred to Feature 6
+
+---
+
+## Git Edge Cases Planning (Future Work)
+
+**Status**: Planning phase - identifying scenarios where commit window assumptions break
+
+### Identified Edge Cases
+
+The current v2 architecture assumes a clean 1:1 relationship between commit windows and prompts based on timestamp ranges. However, several git operations can break this assumption:
+
+#### 1. Cherry-Picking Commits
+**Scenario**: User creates prompts on `feature/auth`, commits, then cherry-picks those commits to `main`
+- **Problem**: Cherry-picked commits have new commit SHAs but same author timestamps
+- **Impact**: `prov blame <cherry-picked-sha>` may show wrong prompts (from different branch/time)
+- **Questions**:
+  - Should prompts follow the original commit or the cherry-pick?
+  - How to detect cherry-picks vs regular commits?
+  - Should we track commit genealogy (original-sha → cherry-picked-sha)?
+
+#### 2. Interactive Rebase / Squashing
+**Scenario**: User creates 5 prompts across 5 commits, then squashes them into 1 commit
+- **Problem**: Single commit window now contains prompts from multiple original time windows
+- **Impact**: All prompts appear in final squashed commit, losing granularity
+- **Questions**:
+  - Is this acceptable? (All prompts did contribute to final state)
+  - Should we track pre-rebase commit SHAs?
+  - How to handle `reword` operations that change commit messages?
+
+#### 3. Rebase (Non-Interactive)
+**Scenario**: User rebases feature branch onto updated main
+- **Problem**: Commit SHAs change, commit timestamps may shift
+- **Impact**: Commit window queries use new timestamps, may exclude prompts from original work
+- **Questions**:
+  - Should `branch_at_capture` be sufficient to track pre-rebase work?
+  - Do we need to track "commit intent" vs "commit SHA"?
+  - How to handle conflicts resolved during rebase?
+
+#### 4. Merge Commits (Complex)
+**Scenario**: User merges `feature/auth` into `main`, git creates merge commit
+- **Problem**: Merge commit has two parents, unclear which commit window to use
+- **Impact**: `prov blame <merge-sha>` shows empty results (no prompts in merge commit's narrow window)
+- **Questions**:
+  - Should merge commits show prompts from both parents?
+  - Should merge commits show only conflict resolution prompts?
+  - How far back should we look in parent history?
+
+#### 5. Amend Commits
+**Scenario**: User commits code, realizes mistake, uses `git commit --amend`
+- **Problem**: New commit SHA, old prompts now point to non-existent commit
+- **Impact**: Original prompts may be "orphaned" from commit history
+- **Questions**:
+  - Should amends update `branch_at_capture` for related prompts?
+  - How to detect amends vs regular commits?
+  - Is timestamp-based window sufficient here?
+
+#### 6. Stash and Apply
+**Scenario**: User creates prompts, stashes changes, switches branches, applies stash
+- **Problem**: Prompts captured on branch A, committed on branch B
+- **Impact**: `branch_at_capture` shows branch A, but commit is on branch B
+- **Questions**:
+  - Is `pre_branch_switch` flag sufficient for this case?
+  - Should we track stash operations?
+  - How to handle stash conflicts?
+
+### Proposed Investigation Approach
+
+**Phase 1: Data Collection**
+1. Add debug logging for complex git operations (cherry-pick, rebase, merge)
+2. Collect real-world examples from development
+3. Identify which edge cases actually occur in practice
+
+**Phase 2: Design Solutions**
+Based on actual usage patterns:
+- Determine if timestamp-based windows + `branch_at_capture` is sufficient
+- Evaluate need for commit genealogy tracking (original-sha → new-sha mappings)
+- Consider adding `git_operation` field to prompts (cherry-pick, rebase, merge, etc.)
+- Design query strategies for multi-parent commits
+
+**Phase 3: Implementation**
+- Extend schema if needed (e.g., `commit_lineage` table)
+- Update blame queries to handle special cases
+- Add tests for each edge case
+- Document expected behavior
+
+### Current Workarounds
+
+Until edge cases are fully addressed, users can:
+- Use `prov tag` commands (Feature 6) to manually override incorrect correlations
+- Query by branch instead of commit: `prov branch show <branch-name>`
+- Export data and analyze externally for complex git histories
+
+### Related Work
+- Feature 6 (Manual Tagging) provides escape hatch for broken correlations
+- Branch query commands (Feature 1) provide alternative query path
+- Tool invocations table already tracks detailed context per prompt
+
+---
+
 ## Phase 0: Foundation (Weeks 1-2)
 
 **Goal**: Core storage engine and CLI scaffold
@@ -850,7 +1096,7 @@ prov window show <commit>            # Show commit window details
 // Aggregate statistics for a repository
 func GetRepoStats(db *sql.DB, repoPath string) (*RepoStats, error)
 
-// Statistics for a specific session
+// Statistics for a specific session (DEPRECATED)
 func GetSessionStats(db *sql.DB, sessionID string) (*SessionStats, error)
 
 // Time-filtered statistics
