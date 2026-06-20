@@ -75,7 +75,6 @@ func TestDaemonAcceptEvent(t *testing.T) {
 	event := &storage.PromptEvent{
 		ID:              "daemon-event-1",
 		Timestamp:       time.Now(),
-		SessionID:       "", // V2: nullable
 		Agent:           "test-agent",
 		PromptText:      "Test prompt from daemon",
 		RepoPath:        "/home/user/test",
@@ -202,7 +201,6 @@ func TestDaemonConcurrentEvents(t *testing.T) {
 			event := &storage.PromptEvent{
 				ID:              fmt.Sprintf("concurrent-%d", index),
 				Timestamp:       time.Now(),
-				SessionID:       "", // V2: nullable
 				Agent:           "test-agent",
 				PromptText:      fmt.Sprintf("Concurrent prompt %d", index),
 				RepoPath:        "/home/user/concurrent",

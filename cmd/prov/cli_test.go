@@ -200,9 +200,6 @@ func TestCLIShow(t *testing.T) {
 		t.Errorf("Expected prompt text in output, got: %s", output)
 	}
 
-	if !strings.Contains(output, sessionID) {
-		t.Errorf("Expected session ID in output, got: %s", output)
-	}
 }
 
 func TestCLIShowNotFound(t *testing.T) {
@@ -298,7 +295,6 @@ func createTestEvent(t *testing.T, db *sql.DB, eventID, sessionID, promptText st
 	event := &storage.PromptEvent{
 		ID:         eventID,
 		Timestamp:  time.Now(),
-		SessionID:  sessionID,
 		Agent:      "test-cli",
 		PromptText: promptText,
 		RepoPath:   "/home/user/test",
@@ -392,7 +388,6 @@ func TestCLIExportJSON(t *testing.T) {
 		{
 			ID:             "export-event-1",
 			Timestamp:      now.Add(-50 * time.Minute),
-			SessionID:      "export-session-1",
 			Agent:          "claude-code",
 			ModelVersion:   "sonnet-4.5",
 			PromptText:     "Implement feature X",
@@ -407,7 +402,6 @@ func TestCLIExportJSON(t *testing.T) {
 		{
 			ID:             "export-event-2",
 			Timestamp:      now.Add(-30 * time.Minute),
-			SessionID:      "export-session-1",
 			Agent:          "claude-code",
 			ModelVersion:   "sonnet-4.5",
 			PromptText:     "Add tests",
@@ -474,7 +468,6 @@ func TestCLIExportCSV(t *testing.T) {
 	event := &storage.PromptEvent{
 		ID:             "export-csv-event",
 		Timestamp:      now.Add(-30 * time.Minute),
-		SessionID:      "export-csv-session",
 		Agent:          "claude-code",
 		ModelVersion:   "sonnet-4.5",
 		PromptText:     "Fix bug",
@@ -517,84 +510,7 @@ func TestCLIExportCSV(t *testing.T) {
 }
 
 func TestCLIExportSession(t *testing.T) {
-	tmpDir := setupTestEnv(t)
-	db := setupTestDB(t, tmpDir)
-	defer db.Close() //nolint:errcheck
-
-	repoPath := tmpDir
-	now := time.Now()
-
-	session1 := &storage.Session{
-		ID:        "export-specific-session",
-		StartTime: now.Add(-2 * time.Hour),
-		RepoPath:  repoPath,
-	}
-	session2 := &storage.Session{
-		ID:        "export-other-session",
-		StartTime: now.Add(-3 * time.Hour),
-		RepoPath:  repoPath,
-	}
-	if err := storage.CreateSession(db, session1); err != nil {
-		t.Fatalf("Failed to create session1: %v", err)
-	}
-	if err := storage.CreateSession(db, session2); err != nil {
-		t.Fatalf("Failed to create session2: %v", err)
-	}
-
-	events := []*storage.PromptEvent{
-		{
-			ID:           "event-in-target-session",
-			Timestamp:    now.Add(-100 * time.Minute),
-			SessionID:    "export-specific-session",
-			Agent:        "claude-code",
-			PromptText:   "Target session event",
-			TokensIn:     100,
-			TokensOut:    200,
-			RepoPath:     repoPath,
-			Author:       "testuser",
-			ToolsInvoked: []string{"read"},
-		},
-		{
-			ID:           "event-in-other-session",
-			Timestamp:    now.Add(-150 * time.Minute),
-			SessionID:    "export-other-session",
-			Agent:        "claude-code",
-			PromptText:   "Other session event",
-			TokensIn:     50,
-			TokensOut:    100,
-			RepoPath:     repoPath,
-			Author:       "testuser",
-			ToolsInvoked: []string{"write"},
-		},
-	}
-
-	for _, event := range events {
-		if err := storage.StorePromptEvent(db, event); err != nil {
-			t.Fatalf("Failed to store event: %v", err)
-		}
-	}
-
-	output, err := runCLI(t, "export", "--session", "export-specific-session", "--format", "json")
-	if err != nil {
-		t.Fatalf("export --session command failed: %v", err)
-	}
-
-	var exported []map[string]interface{}
-	if err := json.Unmarshal([]byte(output), &exported); err != nil {
-		t.Fatalf("Failed to parse JSON output: %v", err)
-	}
-
-	if len(exported) != 1 {
-		t.Errorf("Expected 1 exported event (only from target session), got %d", len(exported))
-	}
-
-	if exported[0]["ID"] != "event-in-target-session" {
-		t.Errorf("Expected event-in-target-session, got %v", exported[0]["ID"])
-	}
-
-	if strings.Contains(output, "event-in-other-session") {
-		t.Error("Should not export events from other sessions")
-	}
+	t.Skip("V2: --session flag no longer filters by session (sessions removed); export all events instead")
 }
 
 func TestCLIExportSince(t *testing.T) {
@@ -618,7 +534,6 @@ func TestCLIExportSince(t *testing.T) {
 		{
 			ID:           "old-event-export",
 			Timestamp:    now.Add(-9 * 24 * time.Hour),
-			SessionID:    "export-timeframe-session",
 			Agent:        "claude-code",
 			PromptText:   "Old event",
 			TokensIn:     50,
@@ -630,7 +545,6 @@ func TestCLIExportSince(t *testing.T) {
 		{
 			ID:           "recent-event-export",
 			Timestamp:    now.Add(-3 * 24 * time.Hour),
-			SessionID:    "export-timeframe-session",
 			Agent:        "claude-code",
 			PromptText:   "Recent event",
 			TokensIn:     100,
@@ -690,7 +604,6 @@ func TestCLIExportToFile(t *testing.T) {
 	event := &storage.PromptEvent{
 		ID:           "export-file-event",
 		Timestamp:    now.Add(-30 * time.Minute),
-		SessionID:    "export-file-session",
 		Agent:        "claude-code",
 		PromptText:   "Test export to file",
 		TokensIn:     75,

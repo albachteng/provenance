@@ -13,9 +13,9 @@ func TestCreateToolInvocation(t *testing.T) {
 	// Create a prompt first (tool invocations reference prompts)
 	// Insert directly to avoid session dependency
 	_, err := db.Exec(`
-		INSERT INTO prompt_events (id, timestamp, session_id, agent, prompt_text, repo_path, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, "prompt-1", time.Now().Unix(), "session-1", "test-agent", "test prompt", "/test/repo", "test-user")
+		INSERT INTO prompt_events (id, timestamp, agent, prompt_text, repo_path, author)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "prompt-1", time.Now().Unix(), "test-agent", "test prompt", "/test/repo", "test-user")
 	if err != nil {
 		t.Fatalf("Failed to create prompt: %v", err)
 	}
@@ -54,9 +54,9 @@ func TestGetToolInvocation(t *testing.T) {
 
 	// Create prompt directly
 	_, err := db.Exec(`
-		INSERT INTO prompt_events (id, timestamp, session_id, agent, prompt_text, repo_path, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, "prompt-2", time.Now().Unix(), "session-2", "test-agent", "test", "/test", "user")
+		INSERT INTO prompt_events (id, timestamp, agent, prompt_text, repo_path, author)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "prompt-2", time.Now().Unix(), "test-agent", "test", "/test", "user")
 	if err != nil {
 		t.Fatalf("Failed to create prompt: %v", err)
 	}
@@ -101,9 +101,9 @@ func TestGetToolInvocationsForPrompt(t *testing.T) {
 
 	// Create prompt directly
 	_, err := db.Exec(`
-		INSERT INTO prompt_events (id, timestamp, session_id, agent, prompt_text, repo_path, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, "prompt-3", time.Now().Unix(), "session-3", "test-agent", "test", "/test", "user")
+		INSERT INTO prompt_events (id, timestamp, agent, prompt_text, repo_path, author)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "prompt-3", time.Now().Unix(), "test-agent", "test", "/test", "user")
 	if err != nil {
 		t.Fatalf("Failed to create prompt: %v", err)
 	}
@@ -165,9 +165,9 @@ func TestDeleteToolInvocation(t *testing.T) {
 
 	// Create prompt directly
 	_, err := db.Exec(`
-		INSERT INTO prompt_events (id, timestamp, session_id, agent, prompt_text, repo_path, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, "prompt-4", time.Now().Unix(), "session-4", "test-agent", "test", "/test", "user")
+		INSERT INTO prompt_events (id, timestamp, agent, prompt_text, repo_path, author)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "prompt-4", time.Now().Unix(), "test-agent", "test", "/test", "user")
 	if err != nil {
 		t.Fatalf("Failed to create prompt: %v", err)
 	}
@@ -204,9 +204,9 @@ func TestDeleteToolInvocationsForPrompt(t *testing.T) {
 
 	// Create prompt directly
 	_, err := db.Exec(`
-		INSERT INTO prompt_events (id, timestamp, session_id, agent, prompt_text, repo_path, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, "prompt-5", time.Now().Unix(), "session-5", "test-agent", "test", "/test", "user")
+		INSERT INTO prompt_events (id, timestamp, agent, prompt_text, repo_path, author)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "prompt-5", time.Now().Unix(), "test-agent", "test", "/test", "user")
 	if err != nil {
 		t.Fatalf("Failed to create prompt: %v", err)
 	}
@@ -248,9 +248,9 @@ func TestToolInvocationCascadeDelete(t *testing.T) {
 
 	// Create prompt directly
 	_, err := db.Exec(`
-		INSERT INTO prompt_events (id, timestamp, session_id, agent, prompt_text, repo_path, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, "prompt-6", time.Now().Unix(), "session-6", "test-agent", "test", "/test", "user")
+		INSERT INTO prompt_events (id, timestamp, agent, prompt_text, repo_path, author)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, "prompt-6", time.Now().Unix(), "test-agent", "test", "/test", "user")
 	if err != nil {
 		t.Fatalf("Failed to create prompt: %v", err)
 	}

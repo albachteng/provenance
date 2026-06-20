@@ -212,7 +212,7 @@ func listEvents(limit int) error {
 	// TODO: implement proper querying (by session, agent, user, project, etc)
 	// For now, get events from all sessions
 	rows, err := db.Query(`
-		SELECT id, timestamp, session_id, agent, prompt_text, author
+		SELECT id, timestamp, agent, prompt_text, author
 		FROM prompt_events
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -227,10 +227,10 @@ func listEvents(limit int) error {
 
 	count := 0
 	for rows.Next() {
-		var id, sessionID, agent, promptText, author string
+		var id, agent, promptText, author string
 		var timestamp int64
 
-		if err := rows.Scan(&id, &timestamp, &sessionID, &agent, &promptText, &author); err != nil {
+		if err := rows.Scan(&id, &timestamp, &agent, &promptText, &author); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -277,7 +277,6 @@ func showEvent(eventID string) error {
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Printf("ID:           %s\n", event.ID)
 	fmt.Printf("Timestamp:    %s\n", event.Timestamp.Format(time.RFC3339))
-	fmt.Printf("Session ID:   %s\n", event.SessionID)
 	fmt.Printf("Agent:        %s\n", event.Agent)
 	fmt.Printf("Model:        %s\n", event.ModelVersion)
 	fmt.Printf("Author:       %s\n", event.Author)
@@ -319,7 +318,7 @@ func searchEvents(query string) error {
 	defer db.Close() //nolint:errcheck
 
 	rows, err := db.Query(`
-		SELECT id, timestamp, session_id, agent, prompt_text
+		SELECT id, timestamp, agent, prompt_text
 		FROM prompt_events
 		WHERE prompt_text LIKE ? OR response_text LIKE ?
 		ORDER BY timestamp DESC
@@ -336,10 +335,10 @@ func searchEvents(query string) error {
 
 	count := 0
 	for rows.Next() {
-		var id, sessionID, agent, promptText string
+		var id, agent, promptText string
 		var timestamp int64
 
-		if err := rows.Scan(&id, &timestamp, &sessionID, &agent, &promptText); err != nil {
+		if err := rows.Scan(&id, &timestamp, &agent, &promptText); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -489,7 +488,6 @@ func sendEventToDaemon(agent, promptText string) {
 	event := storage.PromptEvent{
 		ID:              generateEventID(),
 		Timestamp:       time.Now(),
-		SessionID:       "", // V2: nullable, not used
 		Agent:           agent,
 		PromptText:      promptText,
 		RepoPath:        repoPath,
@@ -693,7 +691,6 @@ func captureHook() error {
 	event := storage.PromptEvent{
 		ID:              generateEventID(),
 		Timestamp:       time.Now(),
-		SessionID:       "", // V2: nullable, not used
 		Agent:           "claude-code",
 		PromptText:      promptText,
 		RepoPath:        cwd,
@@ -1237,9 +1234,10 @@ func cmdExport() {
 	var events []*storage.PromptEvent
 
 	if sessionID != "" {
-		events, err = storage.ListPromptEvents(db, sessionID)
+		fmt.Fprintln(os.Stderr, "Warning: --session flag is not supported in v2 (sessions removed); exporting all events")
+		events, err = exportAllEvents(db)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to list events for session: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Failed to export events: %v\n", err)
 			os.Exit(1)
 		}
 	} else if sinceStr != "" {
@@ -1286,7 +1284,7 @@ func cmdExport() {
 
 func exportAllEvents(db *sql.DB) ([]*storage.PromptEvent, error) {
 	query := `
-		SELECT id, timestamp, session_id, agent, model_version, prompt_text, response_text,
+		SELECT id, timestamp, agent, model_version, prompt_text, response_text,
 		       tokens_in, tokens_out, latency_ms, repo_path, git_commit, git_branch, git_dirty,
 		       dirty_files, author, ide, active_file, workspace_files, prompt_type,
 		       tools_invoked, files_mentioned
@@ -1305,7 +1303,7 @@ func exportAllEvents(db *sql.DB) ([]*storage.PromptEvent, error) {
 
 func exportEventsSince(db *sql.DB, since time.Time) ([]*storage.PromptEvent, error) {
 	query := `
-		SELECT id, timestamp, session_id, agent, model_version, prompt_text, response_text,
+		SELECT id, timestamp, agent, model_version, prompt_text, response_text,
 		       tokens_in, tokens_out, latency_ms, repo_path, git_commit, git_branch, git_dirty,
 		       dirty_files, author, ide, active_file, workspace_files, prompt_type,
 		       tools_invoked, files_mentioned
@@ -1335,7 +1333,7 @@ func scanPromptEvents(rows *sql.Rows) ([]*storage.PromptEvent, error) {
 		var dirtyFilesJSON, workspaceFilesJSON, promptType, toolsInvokedJSON, filesMentionedJSON string
 
 		err := rows.Scan(
-			&e.ID, &timestampUnix, &e.SessionID, &e.Agent, &modelVersion,
+			&e.ID, &timestampUnix, &e.Agent, &modelVersion,
 			&e.PromptText, &responseText, &e.TokensIn, &e.TokensOut, &latencyMs,
 			&e.RepoPath, &gitCommit, &gitBranch, &gitDirty, &dirtyFilesJSON,
 			&e.Author, &ide, &activeFile, &workspaceFilesJSON, &promptType,
@@ -1397,7 +1395,7 @@ func exportJSON(events []*storage.PromptEvent) ([]byte, error) {
 func exportCSV(events []*storage.PromptEvent) ([]byte, error) {
 	var buf strings.Builder
 
-	buf.WriteString("id,timestamp,session_id,agent,model_version,prompt_text,response_text,")
+	buf.WriteString("id,timestamp,agent,model_version,prompt_text,response_text,")
 	buf.WriteString("tokens_in,tokens_out,latency_ms,repo_path,git_commit,git_branch,git_dirty,")
 	buf.WriteString("author,ide,active_file,prompt_type,tools_invoked,files_mentioned\n")
 
@@ -1405,7 +1403,6 @@ func exportCSV(events []*storage.PromptEvent) ([]byte, error) {
 		fields := []string{
 			e.ID,
 			e.Timestamp.Format(time.RFC3339),
-			e.SessionID,
 			e.Agent,
 			e.ModelVersion,
 			escapeCSV(e.PromptText),
@@ -1574,7 +1571,7 @@ func cmdTag() {
 	defer db.Close() //nolint:errcheck
 
 	// Verify prompt exists
-	prompt, err := storage.GetPromptEvent(db, promptID)
+	_, err = storage.GetPromptEvent(db, promptID)
 	if err != nil {
 		if err == storage.ErrNotFound {
 			fmt.Fprintf(os.Stderr, "Error: Prompt not found: %s\n", promptID)
@@ -1588,7 +1585,6 @@ func cmdTag() {
 	changeSet := &storage.ChangeSet{
 		ID:                fmt.Sprintf("cs-%d-%s", time.Now().UnixNano(), promptID[:8]),
 		PromptID:          promptID,
-		SessionID:         prompt.SessionID,
 		Timestamp:         time.Now(),
 		CorrelationMethod: "manual",
 		Confidence:        1.0,
