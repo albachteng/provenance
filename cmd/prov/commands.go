@@ -1474,13 +1474,19 @@ func blameCommit(db *sql.DB, repoPath, commitSHA string) {
 		os.Exit(1)
 	}
 
-	prompts, err := queries.GetPromptsForCommit(db, repoPath, commitSHA, branch)
+	windowPrompts, err := queries.GetPromptsForCommit(db, repoPath, commitSHA, branch)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to query prompts: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(prompts) == 0 {
+	tags, err := storage.GetTagsForCommit(db, commitSHA)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to query manual tags: %v\n", err)
+		tags = nil
+	}
+
+	if len(windowPrompts) == 0 && len(tags) == 0 {
 		fmt.Println("No prompts found in commit window")
 		return
 	}
@@ -1499,20 +1505,44 @@ func blameCommit(db *sql.DB, repoPath, commitSHA string) {
 
 	fmt.Printf("Commit: %s (%s)\n", commitSHA, commitTime.Format("2006-01-02 15:04:05"))
 	fmt.Printf("Branch: %s\n", branch)
-	fmt.Printf("\nFound %d prompt(s) in commit window:\n\n", len(prompts))
 
-	for i, prompt := range prompts {
-		fmt.Printf("[%d] Prompt ID: %s\n", i+1, prompt.ID)
-		fmt.Printf("    Timestamp: %s\n", prompt.Timestamp.Format("2006-01-02 15:04:05"))
-		fmt.Printf("    Agent: %s\n", prompt.Agent)
-		if prompt.Author != "" {
-			fmt.Printf("    Author: %s\n", prompt.Author)
+	if len(windowPrompts) > 0 {
+		fmt.Printf("\nFound %d prompt(s) in commit window:\n\n", len(windowPrompts))
+		for i, prompt := range windowPrompts {
+			fmt.Printf("[%d] Prompt ID: %s\n", i+1, prompt.ID)
+			fmt.Printf("    Timestamp: %s\n", prompt.Timestamp.Format("2006-01-02 15:04:05"))
+			fmt.Printf("    Agent: %s\n", prompt.Agent)
+			if prompt.Author != "" {
+				fmt.Printf("    Author: %s\n", prompt.Author)
+			}
+			fmt.Printf("    Prompt: %s\n", truncatePrompt(prompt.PromptText, 200))
+			if len(prompt.ToolsInvoked) > 0 {
+				fmt.Printf("    Tools: %v\n", prompt.ToolsInvoked)
+			}
+			fmt.Println()
 		}
-		fmt.Printf("    Prompt: %s\n", truncatePrompt(prompt.PromptText, 200))
-		if len(prompt.ToolsInvoked) > 0 {
-			fmt.Printf("    Tools: %v\n", prompt.ToolsInvoked)
+	}
+
+	if len(tags) > 0 {
+		fmt.Printf("\nManually tagged prompt(s):\n\n")
+		for i, tag := range tags {
+			taggedPrompt, err := storage.GetPromptEvent(db, tag.PromptID)
+			if err != nil {
+				fmt.Printf("[%d] Prompt ID: %s (details unavailable)\n\n", i+1, tag.PromptID)
+				continue
+			}
+			fmt.Printf("[%d] Prompt ID: %s (manually tagged)\n", i+1, tag.PromptID)
+			fmt.Printf("    Timestamp: %s\n", taggedPrompt.Timestamp.Format("2006-01-02 15:04:05"))
+			fmt.Printf("    Agent: %s\n", taggedPrompt.Agent)
+			if taggedPrompt.Author != "" {
+				fmt.Printf("    Author: %s\n", taggedPrompt.Author)
+			}
+			fmt.Printf("    Prompt: %s\n", truncatePrompt(taggedPrompt.PromptText, 200))
+			if tag.Note != "" {
+				fmt.Printf("    Note: %s\n", tag.Note)
+			}
+			fmt.Println()
 		}
-		fmt.Println()
 	}
 
 	if len(filesChanged) > 0 {
@@ -1584,37 +1614,25 @@ func truncatePrompt(prompt string, maxLen int) string {
 }
 
 func cmdTag() {
-	// Check minimum args before parsing flags
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha>")
-		fmt.Fprintln(os.Stderr, "   or: prov tag <prompt-id> --file <path>")
+		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha> [--note <text>]")
 		os.Exit(1)
 	}
 
-	// First arg after "tag" is prompt ID
-	// Check if it's a flag instead of a prompt-id
 	if strings.HasPrefix(os.Args[2], "-") {
-		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha>")
-		fmt.Fprintln(os.Stderr, "   or: prov tag <prompt-id> --file <path>")
+		fmt.Fprintln(os.Stderr, "Usage: prov tag <prompt-id> --commit <sha> [--note <text>]")
 		os.Exit(1)
 	}
 
 	promptID := os.Args[2]
 
-	// Parse flags starting from the third argument
 	fs := flag.NewFlagSet("tag", flag.ExitOnError)
-	commitFlag := fs.String("commit", "", "Commit SHA to tag")
-	fileFlag := fs.String("file", "", "File path to tag")
+	commitFlag := fs.String("commit", "", "Commit SHA to associate with this prompt")
+	noteFlag := fs.String("note", "", "Optional note")
 	fs.Parse(os.Args[3:]) //nolint:errcheck
 
-	// Validate flags
-	if *commitFlag == "" && *fileFlag == "" {
-		fmt.Fprintln(os.Stderr, "Error: Must specify either --commit or --file")
-		os.Exit(1)
-	}
-
-	if *commitFlag != "" && *fileFlag != "" {
-		fmt.Fprintln(os.Stderr, "Error: Cannot specify both --commit and --file (mutually exclusive)")
+	if *commitFlag == "" {
+		fmt.Fprintln(os.Stderr, "Error: --commit <sha> is required")
 		os.Exit(1)
 	}
 
@@ -1625,7 +1643,6 @@ func cmdTag() {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Verify prompt exists
 	_, err = storage.GetPromptEvent(db, promptID)
 	if err != nil {
 		if err == storage.ErrNotFound {
@@ -1636,32 +1653,22 @@ func cmdTag() {
 		os.Exit(1)
 	}
 
-	// Create manual change set
-	changeSet := &storage.ChangeSet{
-		ID:                fmt.Sprintf("cs-%d-%s", time.Now().UnixNano(), promptID[:8]),
-		PromptID:          promptID,
-		Timestamp:         time.Now(),
-		CorrelationMethod: "manual",
-		Confidence:        1.0,
+	tag := &storage.PromptTag{
+		ID:        fmt.Sprintf("tag-%d-%s", time.Now().UnixNano(), promptID[:8]),
+		PromptID:  promptID,
+		CommitSHA: *commitFlag,
+		Note:      *noteFlag,
+		CreatedAt: time.Now(),
 	}
 
-	if *commitFlag != "" {
-		changeSet.CommitIntroduced = *commitFlag
-		changeSet.FilesChanged = []string{} // Empty for commit-only tags
-	} else {
-		changeSet.FilesChanged = []string{*fileFlag}
-		changeSet.CommitIntroduced = "" // Empty for file-only tags
-	}
-
-	if err := storage.CreateChangeSet(db, changeSet); err != nil {
+	if err := storage.CreateTag(db, tag); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to create tag: %v\n", err)
 		os.Exit(1)
 	}
 
-	if *commitFlag != "" {
-		fmt.Printf("Tagged prompt %s to commit %s\n", promptID, *commitFlag)
-	} else {
-		fmt.Printf("Tagged prompt %s to file %s\n", promptID, *fileFlag)
+	fmt.Printf("Tagged prompt %s → commit %s\n", promptID, *commitFlag)
+	if *noteFlag != "" {
+		fmt.Printf("Note: %s\n", *noteFlag)
 	}
 }
 
@@ -1681,13 +1688,10 @@ func cmdUntag() {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Delete the manual tag
-	err = storage.DeleteManualChangeSet(db, promptID, commitSHA)
+	err = storage.DeleteTag(db, promptID, commitSHA)
 	if err != nil {
-		if strings.Contains(err.Error(), "no manual tag found") {
-			fmt.Fprintf(os.Stderr, "Error: No manual tag found for prompt %s and commit %s\n", promptID, commitSHA)
-		} else if strings.Contains(err.Error(), "not a manual tag") {
-			fmt.Fprintf(os.Stderr, "Error: Cannot untag - this is %s\n", err.Error())
+		if err == storage.ErrNotFound {
+			fmt.Fprintf(os.Stderr, "Error: No tag found for prompt %s and commit %s\n", promptID, commitSHA)
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: Failed to untag: %v\n", err)
 		}

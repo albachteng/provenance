@@ -32,6 +32,7 @@ func TestDatabaseSchemaCreation(t *testing.T) {
 		"prompt_events",
 		"tool_invocations",
 		"commit_windows",
+		"prompt_tags",
 		"redaction_rules",
 		"schema_migrations", // golang-migrate creates this
 	}
