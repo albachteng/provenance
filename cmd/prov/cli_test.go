@@ -122,10 +122,8 @@ func TestCLIList(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	sessionID := "test-session-cli"
-	createTestSession(t, db, sessionID)
-	createTestEvent(t, db, "event-1", sessionID, "First test prompt")
-	createTestEvent(t, db, "event-2", sessionID, "Second test prompt")
+	createTestEvent(t, db, "event-1", "First test prompt")
+	createTestEvent(t, db, "event-2", "Second test prompt")
 
 	output, err := runCLI(t, "list")
 	if err != nil {
@@ -150,10 +148,8 @@ func TestCLIListLimit(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	sessionID := "test-session-limit"
-	createTestSession(t, db, sessionID)
 	for i := 0; i < 10; i++ {
-		createTestEvent(t, db, fmt.Sprintf("event-%d", i), sessionID, fmt.Sprintf("Prompt %d", i))
+		createTestEvent(t, db, fmt.Sprintf("event-%d", i), fmt.Sprintf("Prompt %d", i))
 	}
 
 	output, err := runCLI(t, "list", "--limit", "3")
@@ -183,9 +179,7 @@ func TestCLIShow(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	sessionID := "test-session-show"
-	createTestSession(t, db, sessionID)
-	createTestEvent(t, db, "show-event-1", sessionID, "Show this prompt")
+	createTestEvent(t, db, "show-event-1", "Show this prompt")
 
 	output, err := runCLI(t, "show", "show-event-1")
 	if err != nil {
@@ -221,11 +215,9 @@ func TestCLISearch(t *testing.T) {
 	db := setupTestDB(t, tmpDir)
 	defer db.Close() //nolint:errcheck
 
-	sessionID := "test-session-search"
-	createTestSession(t, db, sessionID)
-	createTestEvent(t, db, "search-1", sessionID, "Implement authentication feature")
-	createTestEvent(t, db, "search-2", sessionID, "Fix bug in database layer")
-	createTestEvent(t, db, "search-3", sessionID, "Add authentication tests")
+	createTestEvent(t, db, "search-1", "Implement authentication feature")
+	createTestEvent(t, db, "search-2", "Fix bug in database layer")
+	createTestEvent(t, db, "search-3", "Add authentication tests")
 
 	output, err := runCLI(t, "search", "authentication")
 	if err != nil {
@@ -275,21 +267,7 @@ func setupTestDB(t *testing.T, tmpDir string) *sql.DB {
 	return db
 }
 
-func createTestSession(t *testing.T, db *sql.DB, sessionID string) {
-	t.Helper()
-
-	session := &storage.Session{
-		ID:        sessionID,
-		StartTime: time.Now(),
-		RepoPath:  "/home/user/test",
-	}
-
-	if err := storage.CreateSession(db, session); err != nil {
-		t.Fatalf("Failed to create test session: %v", err)
-	}
-}
-
-func createTestEvent(t *testing.T, db *sql.DB, eventID, sessionID, promptText string) {
+func createTestEvent(t *testing.T, db *sql.DB, eventID, promptText string) {
 	t.Helper()
 
 	event := &storage.PromptEvent{
@@ -331,15 +309,120 @@ func TestCLISessionListTableAlignment(t *testing.T) {
 }
 
 func TestCLIStatsRepo(t *testing.T) {
-	t.Skip("V2: Stats command updated - session-based stats replaced with commit-based stats")
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close() //nolint:errcheck
+
+	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	os.Chdir(tmpDir)          //nolint:errcheck
+	defer os.Chdir(originalDir) //nolint:errcheck
+
+	events := []*storage.PromptEvent{
+		{
+			ID:             "stats-event-1",
+			Timestamp:      time.Now().Add(-30 * time.Minute),
+			Agent:          "claude-code",
+			PromptText:     "First prompt",
+			TokensIn:       100,
+			TokensOut:      200,
+			RepoPath:       tmpDir,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"Read", "Edit"},
+			FilesMentioned: []string{"main.go"},
+		},
+		{
+			ID:             "stats-event-2",
+			Timestamp:      time.Now().Add(-15 * time.Minute),
+			Agent:          "claude-code",
+			PromptText:     "Second prompt",
+			TokensIn:       50,
+			TokensOut:      100,
+			RepoPath:       tmpDir,
+			Author:         "testuser",
+			ToolsInvoked:   []string{"Read"},
+			FilesMentioned: []string{"main.go", "util.go"},
+		},
+	}
+	for _, e := range events {
+		if err := storage.StorePromptEvent(db, e); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "stats")
+	if err != nil {
+		t.Fatalf("stats command failed: %v\nOutput: %s", err, output)
+	}
+
+	if !strings.Contains(output, "Total Prompts: 2") {
+		t.Errorf("Expected 'Total Prompts: 2', got: %s", output)
+	}
+	if !strings.Contains(output, "Tokens In: 150") {
+		t.Errorf("Expected 'Tokens In: 150', got: %s", output)
+	}
 }
 
 func TestCLIStatsSession(t *testing.T) {
-	t.Skip("V2: Session-specific stats removed - v2 uses commit windows")
+	t.Skip("V2: Session-specific stats removed - sessions no longer exist")
 }
 
 func TestCLIStatsSince(t *testing.T) {
-	t.Skip("V2: Stats command updated - will be reimplemented with commit-based approach")
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close() //nolint:errcheck
+
+	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	os.Chdir(tmpDir)          //nolint:errcheck
+	defer os.Chdir(originalDir) //nolint:errcheck
+
+	now := time.Now()
+	events := []*storage.PromptEvent{
+		{
+			ID:           "stats-old",
+			Timestamp:    now.Add(-10 * 24 * time.Hour),
+			Agent:        "claude-code",
+			PromptText:   "Old prompt",
+			TokensIn:     999,
+			TokensOut:    999,
+			RepoPath:     tmpDir,
+			Author:       "user",
+		},
+		{
+			ID:           "stats-recent",
+			Timestamp:    now.Add(-1 * time.Hour),
+			Agent:        "claude-code",
+			PromptText:   "Recent prompt",
+			TokensIn:     50,
+			TokensOut:    100,
+			RepoPath:     tmpDir,
+			Author:       "user",
+		},
+	}
+	for _, e := range events {
+		if err := storage.StorePromptEvent(db, e); err != nil {
+			t.Fatalf("Failed to store event: %v", err)
+		}
+	}
+
+	output, err := runCLI(t, "stats", "--since", "2 days ago")
+	if err != nil {
+		t.Fatalf("stats --since command failed: %v\nOutput: %s", err, output)
+	}
+
+	if !strings.Contains(output, "Total Prompts: 1") {
+		t.Errorf("Expected 'Total Prompts: 1' for recent-only stats, got: %s", output)
+	}
+	if strings.Contains(output, "999") {
+		t.Errorf("Old event tokens should not appear in --since output, got: %s", output)
+	}
 }
 
 func TestCLIStatsNoData(t *testing.T) {
@@ -374,15 +457,6 @@ func TestCLIExportJSON(t *testing.T) {
 
 	repoPath := tmpDir
 	now := time.Now()
-
-	session := &storage.Session{
-		ID:        "export-session-1",
-		StartTime: now.Add(-1 * time.Hour),
-		RepoPath:  repoPath,
-	}
-	if err := storage.CreateSession(db, session); err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
 
 	events := []*storage.PromptEvent{
 		{
@@ -456,15 +530,6 @@ func TestCLIExportCSV(t *testing.T) {
 	repoPath := tmpDir
 	now := time.Now()
 
-	session := &storage.Session{
-		ID:        "export-csv-session",
-		StartTime: now.Add(-1 * time.Hour),
-		RepoPath:  repoPath,
-	}
-	if err := storage.CreateSession(db, session); err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
 	event := &storage.PromptEvent{
 		ID:             "export-csv-event",
 		Timestamp:      now.Add(-30 * time.Minute),
@@ -520,15 +585,6 @@ func TestCLIExportSince(t *testing.T) {
 
 	repoPath := tmpDir
 	now := time.Now()
-
-	session := &storage.Session{
-		ID:        "export-timeframe-session",
-		StartTime: now.Add(-10 * 24 * time.Hour),
-		RepoPath:  repoPath,
-	}
-	if err := storage.CreateSession(db, session); err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
 
 	events := []*storage.PromptEvent{
 		{
@@ -591,15 +647,6 @@ func TestCLIExportToFile(t *testing.T) {
 
 	repoPath := tmpDir
 	now := time.Now()
-
-	session := &storage.Session{
-		ID:        "export-file-session",
-		StartTime: now.Add(-1 * time.Hour),
-		RepoPath:  repoPath,
-	}
-	if err := storage.CreateSession(db, session); err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
 
 	event := &storage.PromptEvent{
 		ID:           "export-file-event",

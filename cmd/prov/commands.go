@@ -892,12 +892,11 @@ func uninstallGitHook(hookType string) error {
 	return nil
 }
 
-// correlateCommit is a stub for v2 architecture
-// V2 uses commit windows instead of pre-computed correlations
-// Correlation is now done on-demand via blame commands
+// correlateCommit runs after each git commit via the post-commit hook.
+// Blame queries are on-demand (GetPromptsForCommit calls git directly), so
+// this is intentionally a no-op. The commit_windows table is reserved for
+// a future reporting / stats use case, not for caching blame lookups.
 func correlateCommit(commitSHA, repoPath string) error {
-	// V2: Commit window caching will be implemented later
-	// For now, this is a no-op - blame queries compute associations on-demand
 	return nil
 }
 
@@ -987,22 +986,13 @@ func cmdSession() {
 // Removed functions: sessionList(), sessionShow(), sessionEnd(), formatDuration()
 
 func cmdStats() {
-	var sessionID string
 	var sinceStr string
 
 	for i := 2; i < len(os.Args); i++ {
-		if os.Args[i] == "--session" && i+1 < len(os.Args) {
-			sessionID = os.Args[i+1]
-			i++
-		} else if os.Args[i] == "--since" && i+1 < len(os.Args) {
+		if os.Args[i] == "--since" && i+1 < len(os.Args) {
 			sinceStr = os.Args[i+1]
 			i++
 		}
-	}
-
-	if sessionID != "" {
-		statsSession(sessionID)
-		return
 	}
 
 	if sinceStr != "" {
@@ -1034,30 +1024,7 @@ func statsRepo() {
 	}
 
 	displayStats("Repository", stats.TotalPrompts, stats.TotalTokensIn, stats.TotalTokensOut,
-		stats.SessionCount, stats.FilesMentioned, stats.ToolsInvoked)
-}
-
-func statsSession(sessionID string) {
-	db, err := openDB()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close() //nolint:errcheck
-
-	stats, err := storage.GetSessionStats(db, sessionID)
-	if err != nil {
-		if err == storage.ErrNotFound {
-			fmt.Fprintf(os.Stderr, "Session not found: %s\n", sessionID)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "Failed to get session statistics: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Session: %s\n\n", stats.SessionID)
-	displayStats("Session", stats.TotalPrompts, stats.TotalTokensIn, stats.TotalTokensOut,
-		1, stats.FilesMentioned, stats.ToolsInvoked)
+		stats.FilesMentioned, stats.ToolsInvoked)
 }
 
 func statsSince(sinceStr string) {
@@ -1087,10 +1054,10 @@ func statsSince(sinceStr string) {
 	}
 
 	displayStats(fmt.Sprintf("Since %s", sinceStr), stats.TotalPrompts, stats.TotalTokensIn,
-		stats.TotalTokensOut, stats.SessionCount, stats.FilesMentioned, stats.ToolsInvoked)
+		stats.TotalTokensOut, stats.FilesMentioned, stats.ToolsInvoked)
 }
 
-func displayStats(title string, prompts, tokensIn, tokensOut, sessions int,
+func displayStats(title string, prompts, tokensIn, tokensOut int,
 	files map[string]int, tools map[string]int) {
 
 	fmt.Printf("%s Statistics\n", title)
@@ -1098,7 +1065,6 @@ func displayStats(title string, prompts, tokensIn, tokensOut, sessions int,
 	fmt.Printf("Total Prompts: %d\n", prompts)
 	fmt.Printf("Tokens In: %d\n", tokensIn)
 	fmt.Printf("Tokens Out: %d\n", tokensOut)
-	fmt.Printf("Sessions: %d\n", sessions)
 	fmt.Println()
 
 	if len(files) > 0 {
