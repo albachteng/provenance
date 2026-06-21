@@ -1440,11 +1440,11 @@ func escapeCSV(field string) string {
 // cmdBlame shows which AI prompts led to changes in a commit or file
 func cmdBlame() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: prov blame <commit-sha>")
+		fmt.Fprintln(os.Stderr, "Usage: prov blame <commit-sha|file-path>")
 		os.Exit(1)
 	}
 
-	commitSHA := os.Args[2]
+	arg := os.Args[2]
 
 	db, err := openDB()
 	if err != nil {
@@ -1453,21 +1453,27 @@ func cmdBlame() {
 	}
 	defer db.Close() //nolint:errcheck
 
-	// Get current repo path
 	repoPath, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get current directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Get the branch for this commit
+	// Dispatch: if arg is an existing file, do file-based blame; otherwise treat as commit SHA
+	if info, statErr := os.Stat(arg); statErr == nil && !info.IsDir() {
+		blameFile(db, repoPath, arg)
+	} else {
+		blameCommit(db, repoPath, arg)
+	}
+}
+
+func blameCommit(db *sql.DB, repoPath, commitSHA string) {
 	branch, err := git.GetBranchForCommit(repoPath, commitSHA)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to determine branch for commit: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Query prompts in commit window
 	prompts, err := queries.GetPromptsForCommit(db, repoPath, commitSHA, branch)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to query prompts: %v\n", err)
@@ -1479,14 +1485,12 @@ func cmdBlame() {
 		return
 	}
 
-	// Get commit time for display
 	commitTime, err := git.GetCommitTime(repoPath, commitSHA)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get commit time: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Get files changed in commit
 	filesChanged, err := git.GetFilesChanged(repoPath, commitSHA)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to get files changed: %v\n", err)
@@ -1505,11 +1509,9 @@ func cmdBlame() {
 			fmt.Printf("    Author: %s\n", prompt.Author)
 		}
 		fmt.Printf("    Prompt: %s\n", truncatePrompt(prompt.PromptText, 200))
-
 		if len(prompt.ToolsInvoked) > 0 {
 			fmt.Printf("    Tools: %v\n", prompt.ToolsInvoked)
 		}
-
 		fmt.Println()
 	}
 
@@ -1519,6 +1521,59 @@ func cmdBlame() {
 			fmt.Printf("  - %s\n", file)
 		}
 	}
+}
+
+func blameFile(db *sql.DB, repoPath, filePath string) {
+	currentBranch, err := git.GetCurrentBranch(repoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get current branch: %v\n", err)
+		os.Exit(1)
+	}
+
+	commits, err := git.GetCommitsForFile(repoPath, filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get commits for file: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(commits) == 0 {
+		fmt.Printf("No commits found for file: %s\n", filePath)
+		return
+	}
+
+	fmt.Printf("File: %s\n", filePath)
+	fmt.Printf("Branch: %s\n\n", currentBranch)
+
+	totalPrompts := 0
+	for _, commit := range commits {
+		prompts, err := queries.GetPromptsForCommit(db, repoPath, commit.SHA, currentBranch)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to get prompts for commit %s: %v\n", commit.SHA[:8], err)
+			continue
+		}
+		if len(prompts) == 0 {
+			continue
+		}
+
+		fmt.Printf("Commit: %s (%s)\n", commit.SHA[:8], commit.Timestamp.Format("2006-01-02 15:04:05"))
+		if commit.Message != "" {
+			fmt.Printf("Message: %s\n", commit.Message)
+		}
+		fmt.Printf("%d prompt(s) in window:\n", len(prompts))
+		for i, prompt := range prompts {
+			fmt.Printf("  [%d] %s (%s)\n", i+1, prompt.ID, prompt.Timestamp.Format("2006-01-02 15:04:05"))
+			fmt.Printf("      %s\n", truncatePrompt(prompt.PromptText, 150))
+		}
+		fmt.Println()
+		totalPrompts += len(prompts)
+	}
+
+	if totalPrompts == 0 {
+		fmt.Println("No prompts found in commit windows for this file")
+		return
+	}
+
+	fmt.Printf("Total: %d commit(s) examined, %d prompt(s) found\n", len(commits), totalPrompts)
 }
 
 func truncatePrompt(prompt string, maxLen int) string {

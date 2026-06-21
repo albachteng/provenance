@@ -365,6 +365,155 @@ func TestBlameCommitPreBranchSwitchExcluded(t *testing.T) {
 	}
 }
 
+// TestBlameFile tests file-based blame across a file's commit history
+func TestBlameFile(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close() //nolint:errcheck
+
+	repoPath := filepath.Join(tmpDir, "test-repo")
+	if err := os.MkdirAll(repoPath, 0755); err != nil {
+		t.Fatalf("Failed to create repo dir: %v", err)
+	}
+	if err := git.InitRepo(repoPath); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	// First commit
+	commit1Time := time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC)
+	testFile := filepath.Join(repoPath, "handler.go")
+	if err := os.WriteFile(testFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := git.StageFiles(repoPath, []string{"handler.go"}); err != nil {
+		t.Fatalf("Failed to stage: %v", err)
+	}
+	if _, err := git.CreateCommitWithTime(repoPath, "Initial commit", commit1Time); err != nil {
+		t.Fatalf("Failed to create commit1: %v", err)
+	}
+
+	// Prompt captured before second commit
+	prompt1 := &storage.PromptEvent{
+		ID:              "prompt-file-1",
+		Timestamp:       time.Date(2024, 2, 1, 9, 10, 0, 0, time.UTC),
+		Agent:           "claude-code",
+		PromptText:      "Add HTTP handler for /api/users",
+		RepoPath:        repoPath,
+		GitBranch:       "main",
+		BranchAtCapture: "main",
+		Author:          "testuser",
+	}
+	if err := storage.StorePromptEvent(db, prompt1); err != nil {
+		t.Fatalf("Failed to store prompt1: %v", err)
+	}
+
+	// Second commit modifying the file
+	commit2Time := time.Date(2024, 2, 1, 9, 30, 0, 0, time.UTC)
+	if err := os.WriteFile(testFile, []byte("package main\n\nfunc handler() {}\n"), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := git.StageFiles(repoPath, []string{"handler.go"}); err != nil {
+		t.Fatalf("Failed to stage: %v", err)
+	}
+	if _, err := git.CreateCommitWithTime(repoPath, "Add handler stub", commit2Time); err != nil {
+		t.Fatalf("Failed to create commit2: %v", err)
+	}
+
+	// Prompt captured before third commit
+	prompt2 := &storage.PromptEvent{
+		ID:              "prompt-file-2",
+		Timestamp:       time.Date(2024, 2, 1, 9, 40, 0, 0, time.UTC),
+		Agent:           "claude-code",
+		PromptText:      "Implement the handler logic with auth middleware",
+		RepoPath:        repoPath,
+		GitBranch:       "main",
+		BranchAtCapture: "main",
+		Author:          "testuser",
+	}
+	if err := storage.StorePromptEvent(db, prompt2); err != nil {
+		t.Fatalf("Failed to store prompt2: %v", err)
+	}
+
+	// Third commit
+	commit3Time := time.Date(2024, 2, 1, 10, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(testFile, []byte("package main\n\nfunc handler() { auth() }\n"), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := git.StageFiles(repoPath, []string{"handler.go"}); err != nil {
+		t.Fatalf("Failed to stage: %v", err)
+	}
+	if _, err := git.CreateCommitWithTime(repoPath, "Add auth to handler", commit3Time); err != nil {
+		t.Fatalf("Failed to create commit3: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	os.Chdir(repoPath)          //nolint:errcheck
+	defer os.Chdir(originalDir) //nolint:errcheck
+
+	output, err := runCLI(t, "blame", "handler.go")
+	if err != nil {
+		t.Fatalf("blame file command failed: %v\nOutput: %s", err, output)
+	}
+
+	// Should show file header
+	if !strings.Contains(output, "File: handler.go") {
+		t.Errorf("Expected 'File: handler.go' in output, got: %s", output)
+	}
+
+	// Should show prompts from both windows
+	if !strings.Contains(output, "Add HTTP handler for /api/users") {
+		t.Errorf("Expected prompt1 text in output, got: %s", output)
+	}
+	if !strings.Contains(output, "Implement the handler logic with auth middleware") {
+		t.Errorf("Expected prompt2 text in output, got: %s", output)
+	}
+
+	// Should show summary line
+	if !strings.Contains(output, "Total:") {
+		t.Errorf("Expected 'Total:' summary line in output, got: %s", output)
+	}
+}
+
+// TestBlameFileNoPrompts tests file blame when no prompts exist in any commit window
+func TestBlameFileNoPrompts(t *testing.T) {
+	tmpDir := setupTestEnv(t)
+	db := setupTestDB(t, tmpDir)
+	defer db.Close() //nolint:errcheck
+
+	repoPath := filepath.Join(tmpDir, "test-repo")
+	if err := os.MkdirAll(repoPath, 0755); err != nil {
+		t.Fatalf("Failed to create repo dir: %v", err)
+	}
+	if err := git.InitRepo(repoPath); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	commitTime := time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC)
+	testFile := filepath.Join(repoPath, "util.go")
+	if err := os.WriteFile(testFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	if err := git.StageFiles(repoPath, []string{"util.go"}); err != nil {
+		t.Fatalf("Failed to stage: %v", err)
+	}
+	if _, err := git.CreateCommitWithTime(repoPath, "Add util", commitTime); err != nil {
+		t.Fatalf("Failed to create commit: %v", err)
+	}
+
+	originalDir, _ := os.Getwd()
+	os.Chdir(repoPath)          //nolint:errcheck
+	defer os.Chdir(originalDir) //nolint:errcheck
+
+	output, err := runCLI(t, "blame", "util.go")
+	if err != nil {
+		t.Fatalf("blame file command failed: %v\nOutput: %s", err, output)
+	}
+
+	if !strings.Contains(output, "No prompts found") {
+		t.Errorf("Expected 'No prompts found' in output, got: %s", output)
+	}
+}
+
 // TestBlameNoArgument tests blame with no commit specified
 func TestBlameNoArgument(t *testing.T) {
 	tmpDir := setupTestEnv(t)
